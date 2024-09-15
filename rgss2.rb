@@ -982,18 +982,21 @@ class RPG::System
 		tmp = @elements.dup
 		@elements = []
 		tmp.each{|i|
-				@elements << RPG::unpack_str(i).dup if i != nil
+			@elements << '' if i == nil
+			@elements << RPG::unpack_str(i).dup if i != nil
 		}
 		tmp = []
 		tmp = @switches.dup
 		@switches = []
 		tmp.each{|i|
+			@switches << '' if i == nil
 			@switches << RPG::unpack_str(i).dup if i != nil
 		}
 		tmp = []
 		tmp = @variables.dup
 		@variables = []
 		tmp.each{|i|
+			@variables << '' if i == nil
 			@variables << RPG::unpack_str(i).dup if i != nil
 		}
 		@terms.unpack_names

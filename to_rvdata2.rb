@@ -14,9 +14,6 @@ require_relative 'rgss3'
 
 #追加メソッド
 def restore_rvdata2(list)
-	if list.class == Integer || list.class == TrueClass || list.class == FalseClass 
-		return list
-	end
 	return unless list.has_key?("json_class")
 	obj = nil
 	case list["json_class"]
@@ -46,6 +43,9 @@ def restore_rvdata2(list)
 			obj = RPG::ME.new(list["@name"], list["@volume"], list["@pitch"])
 		when "RPG::SE"
 			obj = RPG::SE.new(list["@name"], list["@volume"], list["@pitch"])
+		when "Symbol"
+			str = "obj = :" + list["s"]
+			eval(str)
 		else
 			str = "obj=" + list["json_class"] + ".new"
 			eval(str)
@@ -62,19 +62,19 @@ def iterate_setting_value(target, list)
 			list[d.to_s].each{|k, v|
 				target.events[k.to_i] = restore_rvdata2(v)
 			}
-			#target.events.each_key{|key|
-			#	p key
-			#}
 		# 値がクラスオブジェクト
 		elsif list[d.to_s].is_a?(Hash)
 			target.instance_variable_set(d, restore_rvdata2(list[d.to_s]))
 		# 値がクラスオブジェクトの配列
-		# some of array may be in this format [Integer, Obj1, Obj2] (ex. EventCommand->MoveRoute)
-		elsif list[d.to_s].is_a?(Array) && (list[d.to_s][0].is_a?(Hash) || list[d.to_s][1].is_a?(Hash))
+		elsif list[d.to_s].is_a?(Array) #&& list[d.to_s][0].is_a?(Hash)
 			data_trans = []
 			list[d.to_s].each{|d|
+				if d.is_a?(Hash)
 					data_trans << restore_rvdata2(d)
-			}
+				else
+					data_trans << d
+				end
+    		}
     	target.instance_variable_set(d, data_trans)
 		else
 			target.instance_variable_set(d, list[d.to_s])
@@ -83,55 +83,61 @@ def iterate_setting_value(target, list)
 end
 
 [
-  'Data/Actors.json',
-  'Data/Animations.json',
-#  'Data/Areas.json',
-  'Data/Armors.json',
-  'Data/Classes.json',
-  'Data/CommonEvents.json',
-  'Data/Enemies.json',
-  'Data/Items.json',
-  *Dir.glob('Data/Map[0-9][0-9][0-9].json'),
-  'Data/MapInfos.json',
-  'Data/Skills.json',
-  'Data/States.json',
-  'Data/System.json',
-  'Data/Tilesets.json',
-  'Data/Troops.json',
-  'Data/Weapons.json'
+  'Json/Actors.json',
+  'Json/Animations.json',
+#  'Json/Areas.json',
+  'Json/Armors.json',
+  'Json/Classes.json',
+  'Json/CommonEvents.json',
+  'Json/Enemies.json',
+  'Json/Items.json',
+  *Dir.glob('Json/Map[0-9][0-9][0-9].json'),
+  'Json/MapInfos.json',
+  'Json/Skills.json',
+  'Json/States.json',
+  'Json/System.json',
+  'Json/Tilesets.json',
+  'Json/Troops.json',
+  'Json/Weapons.json',
+  'Json/Main.json'
 ].each do |json|
+  next if !File.file?(json)
   text = ''
+  path = File.dirname(json)
   p json
   f = File.open(json, 'r:utf-8')
   f.each {|line|
-  	text += line
+    text += line
   }
   data = JSON.parse(text)
+  # p data
   data_trans = nil
   if data.is_a?(Array)
-  	data_trans = []
+    data_trans = []
     data.each{ |d|
-    	if d == nil
-    		data_trans << d
-    	else
-    		data_trans << restore_rvdata2(d)
-    	end
+      if d == nil
+        data_trans << d
+      else
+        data_trans << restore_rvdata2(d)
+      end
     }
   #あまり賢くない方法で対処（後で考える）
   elsif data.is_a?(Hash)
-	  if json == 'Data/MapInfos.json'
-	  	data_trans = {}
-	  	data.each{|k, v|
-	  		data_trans[k.to_i] = restore_rvdata2(v)
-	  	}
-	  else
-	  	data_trans = restore_rvdata2(data)
-	  end
-	else
-		data_trans = restore_rvdata2(data)
+    if json == path + '/MapInfos.json'
+      data_trans = {}
+      data.each{|k, v|
+        data_trans[k.to_i] = restore_rvdata2(v)
+      }
+    else
+      data_trans = restore_rvdata2(data)
+    end
+  else
+    data_trans = restore_rvdata2(data)
   end
-  #p data_trans
-  File.open('Data/'+File.basename(json,'.json')+'.rvdata2', 'wb') do |file|
+  # p data_trans
+  path.gsub!('Json', 'Data')
+  Dir.mkdir(path) if !File.directory?(path)
+  File.open(path+'/'+File.basename(json,'.json')+'.rvdata2', 'wb') do |file|
     file.write(Marshal.dump(data_trans))
   end
   f.close
