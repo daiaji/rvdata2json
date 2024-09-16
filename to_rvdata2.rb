@@ -134,10 +134,10 @@ end
   else
     data_trans = restore_rvdata2(data)
   end
-  # p data_trans
-  path.gsub!("Json", "Data")
-  Dir.mkdir(path) if !File.directory?(path)
-  File.open(path + "/" + File.basename(json, ".json") + ".rvdata2", "wb") do |file|
+  # 修改保存路径
+  new_path = path.gsub("Json", "Data_New")
+  Dir.mkdir(new_path) if !File.directory?(new_path)
+  File.open(new_path + "/" + File.basename(json, ".json") + ".rvdata2", "wb") do |file|
     file.write(Marshal.dump(data_trans))
   end
   f.close
