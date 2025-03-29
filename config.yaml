@@ -1,0 +1,43 @@
+# 配置文件 for rvdata2json.rb
+
+# 默认 RGSS 版本 (如果命令行未指定且无法从 Game.ini 检测)
+# 可选值: "RGSS2", "RGSS3"
+rgss_version: "RGSS3"
+
+# 输入文件夹路径 (相对于游戏目录)
+# 处理 RVData -> JSON 时使用
+input_dir_rvdata: "Data_O" # 存放原始 .rvdata/.rvdata2 文件的目录
+# 处理 JSON -> RVData 时使用
+input_dir_json: "Json"     # 存放 .json 文件的目录
+
+# 输出文件夹路径 (相对于游戏目录)
+# 处理 RVData -> JSON 时的输出目录
+output_dir_json: "Json"     # 转换后 .json 文件的存放目录
+# 处理 JSON -> RVData 时的输出目录
+output_dir_rvdata: "Data"   # 转换后 .rvdata/.rvdata2 文件的存放目录
+
+# 需要处理的文件基础名列表 (支持 Ruby 正则表达式)
+# 程序会根据转换方向和 RGSS 版本自动添加正确的扩展名
+files:
+  - Actors
+  - Animations
+  - Armors
+  - Classes
+  - CommonEvents
+  - Enemies
+  - Items
+  - MapInfos
+  - Skills
+  - States
+  - System
+  - Tilesets # 仅RGSS3，但无论如何都包括在内；如果未找到，则不会处理
+  - Troops
+  - Weapons
+  - Map\d{3}   # 匹配 Map001, Map002, ...
+
+# 需要排除的文件基础名列表 (支持 Ruby 正则表达式)
+# 这些文件即使匹配上面的 'files' 列表，也不会被处理
+exclude_files:
+  - Areas      # RGSS2 only, usually not processed
+  - Scripts    # Script data is not handled by this tool
+  - Main       # If Main.rvdata2 exists and should be skipped
