@@ -20,7 +20,6 @@ class Application
   def initialize(argv)
     @argv = argv
     @options = {
-      # config 路径由 Configuration 类处理默认值和解析
       config: nil,
       rgss_version: nil,
       to_json: false,
@@ -60,7 +59,6 @@ class Application
       opts.separator ""
       opts.separator "选项:"
 
-      # config 参数现在只存储路径，由 Configuration 处理默认文件名
       opts.on("-c", "--config FILE", "指定配置文件路径 (默认为项目根目录下的 config.yaml)") do |file|
         @options[:config] = file
       end
@@ -77,7 +75,6 @@ class Application
 
   # 加载配置
   def load_configuration
-    # 将命令行选项中的 :config (路径或 nil) 传递给 Configuration.new
     config_loader = Configuration.new(@options[:config])
     @config = config_loader.load
   end
@@ -101,7 +98,6 @@ class Application
       puts "从 Game.ini 自动检测到 RGSS 版本: #{@options[:rgss_version]}"
     rescue => e
       puts "警告: 自动检测 RGSS 版本失败: #{e.message}"
-      # 从已加载的 @config 获取回退版本
       fallback_version = @config["rgss_version"] # 配置加载时已处理默认值
       @options[:rgss_version] = fallback_version
       puts "回退到配置指定的 RGSS 版本: #{@options[:rgss_version]}"
@@ -117,12 +113,10 @@ class Application
     puts "检测到 Game.ini 编码: #{encoding}"
 
     begin
-      # 尝试使用检测到的编码加载
       ini_file = IniFile.load(game_ini_path, encoding: encoding)
     rescue Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e
       puts "警告: 使用编码 #{encoding} 加载 Game.ini 失败: #{e.message}。尝试使用 UTF-8..."
       begin
-        # 如果失败，尝试使用 UTF-8 作为备选
         ini_file = IniFile.load(game_ini_path, encoding: "UTF-8")
       rescue => e_utf8
         raise "加载或解析 Game.ini (尝试了 #{encoding} 和 UTF-8) 失败: #{e_utf8.message}"
@@ -131,7 +125,6 @@ class Application
       raise "加载或解析 Game.ini 失败 (编码: #{encoding}): #{e.message}"
     end
 
-    # 检查 Section 和 Key 是否存在，并使用正确的访问方式
     unless ini_file && ini_file.has_section?("Game") && ini_file["Game"].has_key?("RTP")
       raise "Game.ini 格式不正确或缺少 [Game] -> RTP 信息。"
     end
@@ -148,17 +141,14 @@ class Application
   end
 
   # 检测文件编码
-  # @param file_path [String]
-  # @return [String] 编码名称
   def detect_file_encoding(file_path)
     content_sample = File.binread(file_path, 4096) || ""
     detected_encoding_obj = Utils.send(:detect_encoding_safe, content_sample)
     detected_encoding_name = detected_encoding_obj ? detected_encoding_obj.name : "UTF-8"
 
-    # 修正可能的编码名称
     case detected_encoding_name.upcase
-    when "GB2312" then "GBK" # 使用兼容性更好的 GBK
-    when "WINDOWS-1252", "ASCII-8BIT" then "UTF-8" # 假定这些是误判或需要 UTF-8 处理
+    when "GB2312" then "GBK"
+    when "WINDOWS-1252", "ASCII-8BIT" then "UTF-8"
     else detected_encoding_name
     end
   rescue => e
@@ -216,8 +206,12 @@ class Application
         if @options[:to_json]
           puts "转换 #{File.basename(input_file)} -> JSON..."
           input_object = Converter::IO.load_marshal_data(input_file)
-          exporter.export(input_object) # 执行 unpack
-          Converter::IO.write_json_data(output_file, input_object)
+          # ******** 修改点 ********
+          # 捕获 exporter.export 返回的清理后的数据结构
+          cleaned_data = exporter.export(input_object)
+          # 将清理后的数据结构写入 JSON 文件
+          Converter::IO.write_json_data(output_file, cleaned_data)
+          # ******** 结束修改 ********
         else # to_rvdata
           puts "转换 #{File.basename(input_file)} -> RVData..."
           input_data = Converter::IO.load_json_data(input_file)
@@ -230,7 +224,6 @@ class Application
         $stderr.puts "  RGSS 版本: #{@options[:rgss_version]}"
         $stderr.puts "  错误: #{e.class}: #{e.message}"
         e.backtrace.first(10).each { |line| $stderr.puts "    #{line}" }
-        # 重新抛出错误以中止程序
         raise
       end
     end
@@ -260,14 +253,6 @@ class Application
 
       included = file_patterns.empty? || file_patterns.any? { |regex| basename.match?(regex) }
       excluded = !exclude_patterns.empty? && exclude_patterns.any? { |regex| basename.match?(regex) }
-
-      if excluded
-        # Optional: Print excluded files for debugging
-        # puts "[调试] 排除文件: #{relative_path} (匹配排除模式)"
-      elsif !included && !file_patterns.empty?
-        # Optional: Print skipped files for debugging
-        # puts "[调试] 跳过文件: #{relative_path} (不匹配包含模式)"
-      end
 
       included && !excluded
     end
