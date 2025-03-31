@@ -1,5 +1,3 @@
-# encoding: utf-8
-# rvdata2json/lib/application.rb
 # 应用主流程控制
 
 require "optparse"

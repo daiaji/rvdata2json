@@ -1,5 +1,3 @@
-# encoding: utf-8
-# rvdata2json/lib/configuration.rb
 # 负责加载和管理配置文件
 
 require "yaml"

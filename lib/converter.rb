@@ -1,5 +1,3 @@
-# encoding: utf-8
-# rvdata2json/lib/converter.rb
 # 包含核心的 RVData <-> JSON 转换逻辑
 
 require "json"
@@ -10,7 +8,6 @@ require "set"
 module Converter
   # 文件 IO 操作子模块
   module IO
-    # ... (代码保持不变) ...
     def self.load_marshal_data(input_file)
       begin
         File.open(input_file, "rb") { |f| Marshal.load(f) }
