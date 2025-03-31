@@ -1,7 +1,4 @@
 #!/usr/bin/env ruby
-# encoding: utf-8
-# minimal_marshal_demo.rb (v2)
-#
 # 验证 Marshal.load 是否从 .rvdata2 文件本身加载非标准属性，
 # 不依赖项目中的 shared.rb 或 rgss3.rb 的 RPG::State 定义。
 # 添加 RPG::BaseItem::Feature 占位符以允许加载。
@@ -29,7 +26,7 @@ end
 # 指定要加载的文件路径
 rvdata_file_path = "/home/daiaji/下载/新建文件夹/Data/States.rvdata2" # 请确保此路径正确
 
-puts "\n--- 开始加载 Marshal 文件 (使用最小化占位符类 v2): #{File.basename(rvdata_file_path)} ---"
+puts "\n--- 开始加载 Marshal 文件 (使用最小化占位符类): #{File.basename(rvdata_file_path)} ---"
 
 # 检查文件是否存在
 unless File.exist?(rvdata_file_path)
@@ -112,4 +109,4 @@ else
   puts "加载的数据不是预期的数组结构，类型为: #{loaded_data.class}"
 end
 
-puts "\n--- 最小化 DEMO v2 结束 ---"
+puts "\n--- 最小化 DEMO 结束 ---"

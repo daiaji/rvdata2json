@@ -6,7 +6,6 @@ require_relative "shared" # 加载共享定义
 module RPG
   # 区域类 (仅 RGSS2 有)
   class Area
-    include Jsonable
     attr_accessor :id, :name, :map_id, :rect, :encounter_list, :order # ID, 名称, 地图ID, 范围(Rect), 遇敌列表, 顺序
 
     # 解包区域名称
@@ -33,7 +32,7 @@ module RPG
     attr_accessor :character_name, :character_index, :face_name, :face_index, :parameters # 行走图/头像文件名/索引, 能力值(Table)
     attr_accessor :weapon_id, :armor1_id, :armor2_id, :armor3_id, :armor4_id # 初始装备ID (武器, 盾, 头, 身, 饰品)
     attr_accessor :two_swords_style, :fix_equipment, :auto_battle, :super_guard # 特性: 二刀流, 固定装备, 自动战斗, 超级防御
-    attr_accessor :pharmacology, :critical_bonus # 特性: 药理知识, 会心一击修正 (这些在VX Ace中被移到特性系统)
+    attr_accessor :pharmacology, :critical_bonus # 特性: 药理知识, 会心一击修正
 
     # 解包角色相关名称
     def unpack_names(rgss_version = "RGSS2")
@@ -43,7 +42,6 @@ module RPG
 
     # 初始化 Actor 对象 (RGSS2 版本)
     def initialize(rgss_version = "RGSS2")
-      # 调用 BaseItem 的初始化，确保 features 为 nil (因为 BaseItem 初始化会检查版本)
       super(rgss_version)
       # 设置 RGSS2 特有属性的默认值
       @class_id = 1; @initial_level = 1; @exp_basis = 25; @exp_inflation = 35
@@ -52,7 +50,7 @@ module RPG
       @weapon_id = 0; @armor1_id = 0; @armor2_id = 0; @armor3_id = 0; @armor4_id = 0
       @two_swords_style = false; @fix_equipment = false; @auto_battle = false
       @super_guard = false; @pharmacology = false; @critical_bonus = false
-      # 确保移除 RGSS3 可能存在的属性 (如果对象是从不兼容的 Marshal 加载)
+      # 确保移除 RGSS3 可能存在的属性
       RPG.remove_ivar_if_exists(self, :@nickname)
       RPG.remove_ivar_if_exists(self, :@max_level)
       RPG.remove_ivar_if_exists(self, :@equips)
@@ -74,9 +72,9 @@ module RPG
       @prevent_critical = false; @half_mp_cost = false; @double_exp_gain = false; @auto_hp_recover = false
       @element_set = []; @state_set = []
       # 确保移除 RGSS3 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@etype_id) # 来自 EquipItem
-      RPG.remove_ivar_if_exists(self, :@params)   # 来自 EquipItem
-      RPG.remove_ivar_if_exists(self, :@atype_id) # 来自 RGSS3 Armor
+      RPG.remove_ivar_if_exists(self, :@etype_id)
+      RPG.remove_ivar_if_exists(self, :@params)
+      RPG.remove_ivar_if_exists(self, :@atype_id)
     end
   end # Armor
 
@@ -95,9 +93,9 @@ module RPG
       @two_handed = false; @fast_attack = false; @dual_attack = false; @critical_bonus = false
       @element_set = []; @state_set = []
       # 确保移除 RGSS3 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@etype_id) # 来自 EquipItem
-      RPG.remove_ivar_if_exists(self, :@params)   # 来自 EquipItem
-      RPG.remove_ivar_if_exists(self, :@wtype_id) # 来自 RGSS3 Weapon
+      RPG.remove_ivar_if_exists(self, :@etype_id)
+      RPG.remove_ivar_if_exists(self, :@params)
+      RPG.remove_ivar_if_exists(self, :@wtype_id)
     end
   end # Weapon
 
@@ -109,14 +107,14 @@ module RPG
 
     # 初始化 Item 对象 (RGSS2 版本)
     def initialize(rgss_version = "RGSS2")
-      super(rgss_version) # 调用 UsableItem 初始化 (它会处理版本相关的属性如 effects/damage)
+      super(rgss_version) # 调用 UsableItem 初始化
       @scope = 7 # 覆盖默认范围为 "己方单体"
       # 设置 RGSS2 特有属性默认值
       @price = 0; @consumable = true
       @hp_recovery_rate = 0; @hp_recovery = 0; @mp_recovery_rate = 0; @mp_recovery = 0
       @parameter_type = 0; @parameter_points = 0
       # 确保移除 RGSS3 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@itype_id) # 来自 RGSS3 Item
+      RPG.remove_ivar_if_exists(self, :@itype_id)
     end
   end # Item
 
@@ -147,7 +145,6 @@ module RPG
 
   # 职业类 (RGSS2 中是独立类, 不继承 BaseItem)
   class Class
-    include Jsonable
     # RGSS2 职业属性
     attr_accessor :id, :name, :position, :weapon_set, :armor_set # ID, 名称, 位置(0前1中2后), 可装备武器/防具ID列表
     attr_accessor :element_ranks, :state_ranks, :learnings # 元素有效度(Table), 状态有效度(Table), 学习技能列表
@@ -163,18 +160,14 @@ module RPG
     def initialize
       @id = 0; @name = ""; @position = 0
       @weapon_set = []; @armor_set = []
-      # 假设初始时有1个元素/状态，大小可能根据 System 数据变化
-      @element_ranks = Table.new([1, 1, 1, 1, 1]) # 1维, 1个元素, 默认有效度为C(index 3)? -> Table 构造参数需要确认!
-      @state_ranks = Table.new([1, 1, 1, 1, 1])   # 1维, 1个状态, 默认有效度为C(index 3)? -> 查阅VX文档确认Table构造和默认值
-                                                  # 查阅后修正：Table 构造是 [维度, x, y, z, 总数]。这里可能指 1 维，元素/状态数量由 System 决定，初始化应为 [1, N]，N是数量。
-                                                  # 但 Marshal 加载时会覆盖，所以初始值影响不大。这里保持原样。
+      @element_ranks = Table.new([1, 1, 1, 1, 1])
+      @state_ranks = Table.new([1, 1, 1, 1, 1])
       @learnings = [] # RPG::Class::Learning 对象数组
       @skill_name_valid = false; @skill_name = ""
     end
 
     # 嵌套类：职业学习技能
     class Learning
-      include Jsonable
       attr_accessor :level, :skill_id # 学习等级, 技能ID
 
       # 初始化 Learning 对象
@@ -208,17 +201,16 @@ module RPG
       @drop_item1 = RPG::Enemy::DropItem.new # RGSS2 掉落物是独立对象
       @drop_item2 = RPG::Enemy::DropItem.new
       @levitate = false; @has_critical = false
-      @element_ranks = Table.new([1, 1, 1, 1, 1]) # 同 Class，初始化参数可能不准确，依赖 Marshal 加载
+      @element_ranks = Table.new([1, 1, 1, 1, 1])
       @state_ranks = Table.new([1, 1, 1, 1, 1])
       @actions = [RPG::Enemy::Action.new] # 默认包含一个行动模式
       # 确保移除 RGSS3 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@params)     # 来自 RGSS3 Enemy
-      RPG.remove_ivar_if_exists(self, :@drop_items) # RGSS3 的掉落物数组
+      RPG.remove_ivar_if_exists(self, :@params)
+      RPG.remove_ivar_if_exists(self, :@drop_items)
     end
 
     # 嵌套类：敌人行动模式
     class Action
-      include Jsonable
       attr_accessor :kind, :basic, :skill_id, :condition_type, :condition_param1, :condition_param2, :rating # 种类(0基本/1技能), 基本行动编号/技能ID, 条件类型, 条件参数1/2, 行动权重
 
       # 初始化 Action 对象
@@ -233,7 +225,6 @@ module RPG
 
     # 嵌套类：敌人掉落物品 (RGSS2 版本)
     class DropItem
-      include Jsonable
       attr_accessor :kind, :item_id, :weapon_id, :armor_id, :denominator # 种类(1物品/2武器/3防具), 对应ID, 掉落率分母 (1/denominator)
 
       # 初始化 DropItem 对象
@@ -273,7 +264,7 @@ module RPG
       RPG.remove_ivar_if_exists(self, :@auto_removal_timing)
       RPG.remove_ivar_if_exists(self, :@min_turns)
       RPG.remove_ivar_if_exists(self, :@max_turns)
-      RPG.remove_ivar_if_exists(self, :@remove_by_damage) # RGSS3 的受伤解除概率属性
+      RPG.remove_ivar_if_exists(self, :@remove_by_damage)
       RPG.remove_ivar_if_exists(self, :@chance_by_damage)
       RPG.remove_ivar_if_exists(self, :@remove_by_walking)
       RPG.remove_ivar_if_exists(self, :@steps_to_remove)

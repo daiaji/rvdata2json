@@ -204,12 +204,8 @@ class Application
         if @options[:to_json]
           puts "转换 #{File.basename(input_file)} -> JSON..."
           input_object = Converter::IO.load_marshal_data(input_file)
-          # ******** 修改点 ********
-          # 捕获 exporter.export 返回的清理后的数据结构
           cleaned_data = exporter.export(input_object)
-          # 将清理后的数据结构写入 JSON 文件
           Converter::IO.write_json_data(output_file, cleaned_data)
-          # ******** 结束修改 ********
         else # to_rvdata
           puts "转换 #{File.basename(input_file)} -> RVData..."
           input_data = Converter::IO.load_json_data(input_file)

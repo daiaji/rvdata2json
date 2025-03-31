@@ -66,14 +66,13 @@ module RPG
       @learnings = [] # RPG::Class::Learning 对象数组
 
       # 添加 RGSS3 职业默认特性
-      # 注意：这里的特性代码和数据ID可能需要根据VX Ace编辑器默认值精确调整
-      @features.push(RPG::BaseItem::Feature.new(23, 0, 1))    # 元素有效度? 特性代码23，数据ID 0 (第一个元素?), 值 1 (100%?) - 需要核实
-      @features.push(RPG::BaseItem::Feature.new(22, 0, 0.95)) # 能力值: 命中率(数据ID 0) +95%
-      @features.push(RPG::BaseItem::Feature.new(22, 1, 0.05)) # 能力值: 回避率(数据ID 1) +5%
-      @features.push(RPG::BaseItem::Feature.new(22, 2, 0.04)) # 能力值: 会心率(数据ID 2) +4% - VX Ace默认是0，这里可能是示例
-      @features.push(RPG::BaseItem::Feature.new(41, 1))       # 装备武器类型: 允许装备 ID 为 1 的武器类型
-      @features.push(RPG::BaseItem::Feature.new(51, 1))       # 攻击元素: 附加 ID 为 1 的元素
-      @features.push(RPG::BaseItem::Feature.new(52, 1))       # 攻击状态: 附加 ID 为 1 的状态? - 需要核实默认值
+      @features.push(RPG::BaseItem::Feature.new(23, 0, 1))
+      @features.push(RPG::BaseItem::Feature.new(22, 0, 0.95))
+      @features.push(RPG::BaseItem::Feature.new(22, 1, 0.05))
+      @features.push(RPG::BaseItem::Feature.new(22, 2, 0.04))
+      @features.push(RPG::BaseItem::Feature.new(41, 1))
+      @features.push(RPG::BaseItem::Feature.new(51, 1))
+      @features.push(RPG::BaseItem::Feature.new(52, 1))
 
       # 确保移除 RGSS2 可能存在的属性
       RPG.remove_ivar_if_exists(self, :@position)
@@ -87,7 +86,6 @@ module RPG
 
     # 嵌套类：职业学习技能 (RGSS3 版本)
     class Learning
-      include Jsonable
       attr_accessor :level, :skill_id, :note # 学习等级, 技能ID, 备注
 
       # 解包备注字符串
@@ -113,7 +111,6 @@ module RPG
     def unpack_names(rgss_version = "RGSS3")
       super(rgss_version) # 调用 UsableItem 的 unpack_names (处理 name, description, note, damage.formula)
       Utils.unpack_names_for(self, :message1, :message2) # 解包使用信息
-      # damage 对象本身由 UsableItem 的 unpack_names 处理
     end
 
     # 初始化 Skill 对象 (RGSS3 版本)
@@ -168,7 +165,6 @@ module RPG
       RPG.remove_ivar_if_exists(self, :@kind) # 来自 RGSS2 Armor
       RPG.remove_ivar_if_exists(self, :@eva)  # 来自 RGSS2 Armor
       RPG.remove_ivar_if_exists(self, :@hit)  # 来自 RGSS2 Weapon/Skill/Enemy
-      # RGSS2 的 atk, def, spi, agi 已被 RGSS3 的 params 覆盖
     end
   end # EquipItem
 
@@ -185,11 +181,10 @@ module RPG
       # 设置武器特有属性默认值
       @wtype_id = 0; @animation_id = 0
       # 添加 RGSS3 武器默认特性
-      @features.push(RPG::BaseItem::Feature.new(31, 1, 0)) # 攻击元素: 物理 (元素 ID 1?) - 需要核实
-      @features.push(RPG::BaseItem::Feature.new(22, 0, 0)) # 能力值: 命中率 +0%
+      @features.push(RPG::BaseItem::Feature.new(31, 1, 0))
+      @features.push(RPG::BaseItem::Feature.new(22, 0, 0))
       # 确保移除 RGSS2 可能存在的属性 (EquipItem 已处理部分)
       RPG.remove_ivar_if_exists(self, :@hit) # 再次确认移除 RGSS2 hit
-      # @atk 等已被 params 覆盖
     end
   end # Weapon
 
@@ -206,11 +201,10 @@ module RPG
       # 设置防具特有属性默认值
       @atype_id = 0
       # 添加 RGSS3 防具默认特性
-      @features.push(RPG::BaseItem::Feature.new(22, 1, 0)) # 能力值: 回避率 +0%
+      @features.push(RPG::BaseItem::Feature.new(22, 1, 0))
       # 确保移除 RGSS2 可能存在的属性 (EquipItem 已处理部分)
       RPG.remove_ivar_if_exists(self, :@kind) # 再次确认移除 RGSS2 kind
       RPG.remove_ivar_if_exists(self, :@eva)  # 再次确认移除 RGSS2 eva
-      # @def 等已被 params 覆盖
     end
   end # Armor
 
@@ -237,29 +231,28 @@ module RPG
       @drop_items = Array.new(3) { RPG::Enemy::DropItem.new } # 3个掉落物品栏位
       @actions = [RPG::Enemy::Action.new] # 默认包含一个行动模式
       # 添加 RGSS3 敌人默认特性
-      @features.push(RPG::BaseItem::Feature.new(22, 0, 0.95)) # 能力值: 命中率 +95%
-      @features.push(RPG::BaseItem::Feature.new(22, 1, 0.05)) # 能力值: 回避率 +5%
-      @features.push(RPG::BaseItem::Feature.new(31, 1, 0))    # 攻击元素: 物理 (ID 1?)
+      @features.push(RPG::BaseItem::Feature.new(22, 0, 0.95))
+      @features.push(RPG::BaseItem::Feature.new(22, 1, 0.05))
+      @features.push(RPG::BaseItem::Feature.new(31, 1, 0))
       # 确保移除 RGSS2 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@maxhp) # RGSS2 的独立能力值
+      RPG.remove_ivar_if_exists(self, :@maxhp)
       RPG.remove_ivar_if_exists(self, :@maxmp)
       RPG.remove_ivar_if_exists(self, :@atk)
       RPG.remove_ivar_if_exists(self, :@def)
       RPG.remove_ivar_if_exists(self, :@spi)
       RPG.remove_ivar_if_exists(self, :@agi)
-      RPG.remove_ivar_if_exists(self, :@hit) # RGSS2 的命中/回避
+      RPG.remove_ivar_if_exists(self, :@hit)
       RPG.remove_ivar_if_exists(self, :@eva)
-      RPG.remove_ivar_if_exists(self, :@drop_item1) # RGSS2 的独立掉落物对象
+      RPG.remove_ivar_if_exists(self, :@drop_item1)
       RPG.remove_ivar_if_exists(self, :@drop_item2)
-      RPG.remove_ivar_if_exists(self, :@levitate) # RGSS2 的独立特性
+      RPG.remove_ivar_if_exists(self, :@levitate)
       RPG.remove_ivar_if_exists(self, :@has_critical)
-      RPG.remove_ivar_if_exists(self, :@element_ranks) # RGSS2 的有效度 Table
+      RPG.remove_ivar_if_exists(self, :@element_ranks)
       RPG.remove_ivar_if_exists(self, :@state_ranks)
     end
 
     # 嵌套类：敌人行动模式 (RGSS3 版本)
     class Action
-      include Jsonable
       attr_accessor :skill_id, :condition_type, :condition_param1, :condition_param2, :rating # 技能ID, 条件类型, 条件参数1/2, 行动权重
 
       # 初始化 Action 对象
@@ -271,7 +264,6 @@ module RPG
 
     # 嵌套类：敌人掉落物品 (RGSS3 版本)
     class DropItem
-      include Jsonable
       attr_accessor :kind, :data_id, :denominator # 种类(0无,1物品,2武器,3防具), 数据ID, 掉落率分母 (1/denominator)
 
       # 初始化 DropItem 对象
@@ -307,26 +299,25 @@ module RPG
       @remove_by_walking = false; @steps_to_remove = 100 # 默认不因行走解除
       @message1 = ""; @message2 = ""; @message3 = ""; @message4 = "" # 默认无信息
       # 确保移除 RGSS2 可能存在的属性
-      RPG.remove_ivar_if_exists(self, :@atk_rate) # RGSS2 的能力值变化率
+      RPG.remove_ivar_if_exists(self, :@atk_rate)
       RPG.remove_ivar_if_exists(self, :@def_rate)
       RPG.remove_ivar_if_exists(self, :@spi_rate)
       RPG.remove_ivar_if_exists(self, :@agi_rate)
-      RPG.remove_ivar_if_exists(self, :@nonresistance) # RGSS2 的独立特性
+      RPG.remove_ivar_if_exists(self, :@nonresistance)
       RPG.remove_ivar_if_exists(self, :@offset_by_opposite)
       RPG.remove_ivar_if_exists(self, :@slip_damage)
       RPG.remove_ivar_if_exists(self, :@reduce_hit_ratio)
       RPG.remove_ivar_if_exists(self, :@battle_only)
-      RPG.remove_ivar_if_exists(self, :@release_by_damage) # RGSS2 的受伤解除布尔值
+      RPG.remove_ivar_if_exists(self, :@release_by_damage)
       RPG.remove_ivar_if_exists(self, :@hold_turn)
       RPG.remove_ivar_if_exists(self, :@auto_release_prob)
-      RPG.remove_ivar_if_exists(self, :@element_set) # RGSS2 的防御集合
+      RPG.remove_ivar_if_exists(self, :@element_set)
       RPG.remove_ivar_if_exists(self, :@state_set)
     end
   end # State
 
   # 图块集类 (RGSS3 特有, Tilesets.rvdata2)
   class Tileset
-    include Jsonable
     attr_accessor :id, :mode, :name, :tileset_names, :flags, :note # ID, 模式(1:VX兼容, 2:XP?), 名称, 图块文件名列表, 标志数据(Table), 备注
 
     # 解包图块集名称、备注和文件名列表
@@ -353,7 +344,6 @@ module RPG
 
   # 地图遇敌列表项 (RGSS3 版本)
   class Map::Encounter
-    include Jsonable
     attr_accessor :troop_id, :weight, :region_set # 队伍ID, 权重, 有效区域ID列表
 
     # 初始化 Encounter 对象
@@ -364,13 +354,9 @@ module RPG
 
   # 特性类 (用于 BaseItem 的 features 数组)
   class BaseItem::Feature
-    include Jsonable
     attr_accessor :code, :data_id, :value # 特性代码, 数据ID, 值
 
     # 初始化 Feature 对象
-    # code: 特性代码 (整数, 标识特性类型)
-    # data_id: 相关数据ID (如元素ID, 状态ID, 能力值索引等)
-    # value: 特性值 (通常是浮点数或整数, 表示倍率、固定值等)
     def initialize(code = 0, data_id = 0, value = 0)
       @code = code; @data_id = data_id; @value = value
     end
@@ -378,13 +364,9 @@ module RPG
 
   # 效果类 (用于 UsableItem 的 effects 数组)
   class UsableItem::Effect
-    include Jsonable
     attr_accessor :code, :data_id, :value1, :value2 # 效果代码, 数据ID, 效果值1, 效果值2
 
     # 初始化 Effect 对象
-    # code: 效果代码 (整数, 标识效果类型)
-    # data_id: 相关数据ID (如状态ID, 技能ID, 属性索引等)
-    # value1, value2: 效果参数 (根据效果类型含义不同)
     def initialize(code = 0, data_id = 0, value1 = 0, value2 = 0)
       @code = code; @data_id = data_id; @value1 = value1; @value2 = value2
     end
@@ -392,7 +374,6 @@ module RPG
 
   # 伤害类 (用于 UsableItem 的 damage 属性)
   class UsableItem::Damage
-    include Jsonable
     attr_accessor :type, :element_id, :formula, :variance, :critical # 类型, 元素ID, 公式(字符串), 分散度(%), 允许会心?
 
     # 解包伤害公式字符串
