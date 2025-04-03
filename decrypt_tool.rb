@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'fileutils'
-require 'optparse' # 用于解析命令行参数
+require "fileutils"
+require "optparse" # 用于解析命令行参数
 
 # --- Define the Module and Error Class (Namespace) ---
 module RgssadExtractor
@@ -12,7 +12,7 @@ end
 # --- Require the Compiled C Extension ---
 begin
   # 假设 C 扩展文件位于与此脚本同级的 rgssad_extractor 目录中
-  require_relative 'rgssad_extractor/rgssad_extractor'
+  require_relative "rgssad_extractor/rgssad_extractor"
 rescue LoadError => e
   warn <<~ERROR # 使用 warn 而不是 puts，错误信息输出到 stderr
     Error: Failed to load the C extension 'rgssad_extractor'.
@@ -30,8 +30,8 @@ end
 
 options = {
   input: nil,
-  output: 'extracted_output', # 默认输出目录
-  verbose: false
+  output: "extracted_output", # 默认输出目录
+  verbose: false,
 }
 
 parser = OptionParser.new do |opts|
@@ -106,7 +106,7 @@ end
 puts "Starting extraction..."
 puts "  Input Archive: #{options[:input]}"
 puts "  Output Directory: #{options[:output]}"
-puts "  Verbose Output: #{options[:verbose] ? 'Enabled' : 'Disabled'}"
+puts "  Verbose Output: #{options[:verbose] ? "Enabled" : "Disabled"}"
 puts "-" * 20
 
 start_time = Time.now
@@ -124,7 +124,6 @@ begin
 
   puts "-" * 20
   puts "Extraction completed successfully in %.2f seconds." % duration
-
 rescue RgssadExtractor::RGSSADFileError => e
   warn "\nExtraction Error: #{e.message}" # 使用 warn
   exit(1)
