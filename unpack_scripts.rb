@@ -11,7 +11,7 @@ require "optparse" # For command-line argument parsing
 
 # --- Default Configuration ---
 DEFAULT_INPUT_FILE = "Data/Scripts.rvdata"
-DEFAULT_OUTPUT_DIR = "Data/Scripts_unpacked_numeric"
+DEFAULT_OUTPUT_DIR = "/home/daiaji/工程/脚本/Scripts_unpacked_numeric"
 # The encoding we assume the original script names are in
 ASSUMED_ENCODING = "UTF-8"
 # ---------------------------

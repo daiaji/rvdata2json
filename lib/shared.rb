@@ -131,7 +131,7 @@ module RPG
     attr_accessor :boat, :ship, :airship, :title_bgm, :battle_bgm, :battle_end_me, :gameover_me
     attr_accessor :sounds, :test_battlers, :test_troop_id, :start_map_id, :start_x, :start_y
     attr_accessor :terms # Terms object itself is shared structure placeholder
-    attr_accessor :battler_name, :battler_hue, :edit_map_id, :magic_number
+    attr_accessor :battler_name, :battler_hue, :edit_map_id
     # Version-specific accessors are added via Mixins in rgssX.rb
 
     # Define nested shared classes

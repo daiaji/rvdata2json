@@ -91,7 +91,7 @@ module RPG
   class System
     include RPG::SystemExtensionsRGSS2
 
-    def initialize; @game_title = ""; @version_id = 0; @magic_number = 0; @party_members = [1]; @elements = [nil, ""]; @switches = [nil, ""]; @variables = [nil, ""]; @boat = RPG::System::Vehicle.new; @ship = RPG::System::Vehicle.new; @airship = RPG::System::Vehicle.new; @title_bgm = RPG::BGM.new; @battle_bgm = RPG::BGM.new; @battle_end_me = RPG::ME.new; @gameover_me = RPG::ME.new; @sounds = []; @test_battlers = []; @test_troop_id = 1; @start_map_id = 1; @start_x = 0; @start_y = 0; @terms = nil; @battler_name = ""; @battler_hue = 0; @edit_map_id = 1; @terms = RPG::System::Terms.new; initialize_system_rgss2_specifics; end
+    def initialize; @game_title = ""; @version_id = 0; @party_members = [1]; @elements = [nil, ""]; @switches = [nil, ""]; @variables = [nil, ""]; @boat = RPG::System::Vehicle.new; @ship = RPG::System::Vehicle.new; @airship = RPG::System::Vehicle.new; @title_bgm = RPG::BGM.new; @battle_bgm = RPG::BGM.new; @battle_end_me = RPG::ME.new; @gameover_me = RPG::ME.new; @sounds = []; @test_battlers = []; @test_troop_id = 1; @start_map_id = 1; @start_x = 0; @start_y = 0; @terms = nil; @battler_name = ""; @battler_hue = 0; @edit_map_id = 1; @terms = RPG::System::Terms.new; initialize_system_rgss2_specifics; end
     def unpack_names; Utils.unpack_names_for(self, :game_title, :battler_name); unpack_names_system_rgss2; @terms.unpack_names if @terms.respond_to?(:unpack_names); end
 
     # Nested classes (保持不变)

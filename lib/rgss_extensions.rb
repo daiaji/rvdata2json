@@ -557,7 +557,7 @@ module RPG
     attr_accessor :title1_name, :title2_name, :opt_draw_title, :opt_use_midi, :opt_transparent
     attr_accessor :opt_followers, :opt_slip_death, :opt_floor_death, :opt_display_tp, :opt_extra_exp
     attr_accessor :window_tone, :battleback1_name, :battleback2_name
-    # magic_number, elements, switches, variables, sounds, terms 在共享/覆盖中处理
+    # elements, switches, variables, sounds, terms 在共享/覆盖中处理
 
     def initialize_system_rgss3_specifics
       # 初始化 RGSS3 System 特有属性
@@ -581,7 +581,6 @@ module RPG
       @sounds = Array.new(24) { RPG::SE.new }
       @battleback1_name = ""
       @battleback2_name = ""
-      @magic_number = 1 # 覆盖共享默认值
       # terms 在 rgss3.rb 的 System#initialize 中创建
     end
 

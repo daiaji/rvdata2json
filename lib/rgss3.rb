@@ -10,7 +10,7 @@ module RPG
   class UsableItem; class Effect; attr_accessor :code, :data_id, :value1, :value2; def initialize(code = 0, data_id = 0, value1 = 0, value2 = 0); @code = code; @data_id = data_id; @value1 = value1; @value2 = value2; end; end; class Damage; attr_accessor :type, :element_id, :formula, :variance, :critical; def unpack_names; Utils.unpack_names_for(self, :formula); end; def initialize; @type = 0; @element_id = 0; @formula = "0"; @variance = 20; @critical = false; end; end; end
 
   # --- 重打开共享类以适应 RGSS3 ---
-  class Actor
+  class Actor < RPG::BaseItem
     include RPG::BaseItemExtensionsRGSS3
     include RPG::ActorExtensionsRGSS3
 
@@ -31,7 +31,7 @@ module RPG
     class Learning; attr_accessor :level, :skill_id, :note; def unpack_names; Utils.unpack_names_for(self, :note); end; def initialize; @level = 1; @skill_id = 1; @note = ""; end; end
   end
 
-  class Skill
+  class Skill < RPG::UsableItem
     include RPG::BaseItemExtensionsRGSS3
     include RPG::UsableItemExtensionsRGSS3
     include RPG::SkillExtensionsRGSS3
@@ -40,7 +40,7 @@ module RPG
     def unpack_names; super(); unpack_names_usableitem_rgss3; unpack_names_skill_rgss3; end
   end
 
-  class Item
+  class Item < RPG::UsableItem
     include RPG::BaseItemExtensionsRGSS3
     include RPG::UsableItemExtensionsRGSS3
     include RPG::ItemExtensionsRGSS3
@@ -130,7 +130,7 @@ module RPG
 
     def initialize
       # Manually set shared attributes
-      @game_title = ""; @version_id = 0; @party_members = [1]; @switches = [nil, ""]; @variables = [nil, ""]; @elements = [nil, ""]; @boat = RPG::System::Vehicle.new; @ship = RPG::System::Vehicle.new; @airship = RPG::System::Vehicle.new; @title_bgm = RPG::BGM.new; @battle_bgm = RPG::BGM.new; @battle_end_me = RPG::ME.new; @gameover_me = RPG::ME.new; @test_battlers = []; @test_troop_id = 1; @start_map_id = 1; @start_x = 0; @start_y = 0; @edit_map_id = 1; @magic_number = 0; @battler_name = ""; @battler_hue = 0
+      @game_title = ""; @version_id = 0; @party_members = [1]; @switches = [nil, ""]; @variables = [nil, ""]; @elements = [nil, ""]; @boat = RPG::System::Vehicle.new; @ship = RPG::System::Vehicle.new; @airship = RPG::System::Vehicle.new; @title_bgm = RPG::BGM.new; @battle_bgm = RPG::BGM.new; @battle_end_me = RPG::ME.new; @gameover_me = RPG::ME.new; @test_battlers = []; @test_troop_id = 1; @start_map_id = 1; @start_x = 0; @start_y = 0; @edit_map_id = 1; @battler_name = ""; @battler_hue = 0
       @terms = RPG::System::Terms.new # Instantiate specific Terms
       initialize_system_rgss3_specifics # Call mixin init
     end

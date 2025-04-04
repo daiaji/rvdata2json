@@ -145,7 +145,7 @@ module Converter
         "RPG::Skill" => Set.new([:@hit]),
         "RPG::Enemy" => Set.new([:@maxhp, :@maxmp, :@atk, :@def, :@spi, :@agi, :@hit, :@eva, :@drop_item1, :@drop_item2, :@levitate, :@has_critical, :@element_ranks, :@state_ranks]),
         "RPG::State" => Set.new([:@atk_rate, :@def_rate, :@spi_rate, :@agi_rate, :@nonresistance, :@offset_by_opposite, :@slip_damage, :@reduce_hit_ratio, :@battle_only, :@release_by_damage, :@hold_turn, :@auto_release_prob, :@element_set, :@state_set]),
-        "RPG::System" => Set.new([:@passages]), # RGSS2 Table
+        "RPG::System" => Set.new([:@passages, :@magic_number]), # RGSS1 Table
         "RPG::System::TestBattler" => Set.new([:@weapon_id, :@armor1_id, :@armor2_id, :@armor3_id, :@armor4_id]),
         "RPG::Troop::Member" => Set.new([:@immortal]),
       # Keep RGSS2 classes if they exist (they won't be loaded in RGSS3 mode anyway)
@@ -164,7 +164,7 @@ module Converter
         "RPG::Armor" => Set.new([:@atype_id, :@etype_id, :@params, :@features]), # RGSS3 Armor attributes (on top of EquipItem)
         "RPG::Enemy" => Set.new([:@params, :@drop_items]), # RGSS3 Enemy attributes
         "RPG::State" => Set.new([:@remove_at_battle_end, :@remove_by_restriction, :@auto_removal_timing, :@min_turns, :@max_turns, :@remove_by_damage, :@chance_by_damage, :@remove_by_walking, :@steps_to_remove]), # RGSS3 State attributes
-        "RPG::System" => Set.new([:@japanese, :@currency_unit, :@skill_types, :@weapon_types, :@armor_types, :@title1_name, :@title2_name, :@opt_draw_title, :@opt_use_midi, :@opt_transparent, :@opt_followers, :@opt_slip_death, :@opt_floor_death, :@opt_display_tp, :@opt_extra_exp, :@window_tone, :@battleback1_name, :@battleback2_name]), # RGSS3 System attributes
+        "RPG::System" => Set.new([:@japanese, :@magic_number, :@currency_unit, :@skill_types, :@weapon_types, :@armor_types, :@title1_name, :@title2_name, :@opt_draw_title, :@opt_use_midi, :@opt_transparent, :@opt_followers, :@opt_slip_death, :@opt_floor_death, :@opt_display_tp, :@opt_extra_exp, :@window_tone, :@battleback1_name, :@battleback2_name]), # RGSS3 System attributes
         "RPG::System::Terms" => Set.new([:@basic, :@params, :@etypes, :@commands]), # RGSS3 Terms attributes
         "RPG::System::TestBattler" => Set.new([:@equips]), # RGSS3 TestBattler attributes
         "RPG::Map" => Set.new([:@display_name, :@tileset_id, :@specify_battleback, :@battleback1_name, :@battleback2_name, :@note]), # RGSS3 Map attributes
