@@ -6,7 +6,7 @@ rgss_version: "RGSS3"
 
 # 输入文件夹路径 (相对于游戏目录)
 # 处理 RVData -> JSON 时使用
-input_dir_rvdata: "Data_O" # 存放原始 .rvdata/.rvdata2 文件的目录
+input_dir_rvdata: "Data_原始" # 存放原始 .rvdata/.rvdata2 文件的目录
 # 处理 JSON -> RVData 时使用
 input_dir_json: "Json"     # 存放 .json 文件的目录
 
