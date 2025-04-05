@@ -4,8 +4,9 @@
 require "oj"
 require "fileutils"
 require "set"
+require "zlib" # 引入 zlib 用于脚本压缩/解压缩
 
-# 转换器模块，包含 IO、导出器和恢复器
+# 转换器模块，包含 IO、导出器、恢复器和脚本处理器
 module Converter
   # 文件 IO 操作子模块 (保持不变)
   module IO
@@ -107,8 +108,7 @@ module Converter
 
   # 将 Ruby 对象转换为适合 JSON 序列化的数据结构 (负责 unpack 和 过滤)
   class JsonExporter
-    # 定义在导出特定版本 JSON 时应被过滤掉的属性
-    # (只包含 在当前版本中已废弃 的 旧版本属性)
+    # ... (ATTRIBUTES_REMOVED, initialize, export, unpack_recursively, call_unpack_names, clean_for_export 保持不变) ...
     ATTRIBUTES_REMOVED = {
       # --- 导出为 RGSS3 (Ace) JSON 时，过滤掉这些 RGSS1/RGSS2 废弃属性 ---
       "RGSS3" => {
@@ -210,7 +210,6 @@ module Converter
       # --- 导出为 RGSS1 (XP) 时，没有更旧的标准版本，不移除 ---
       "RGSS1" => {},
     }.freeze
-    # --- 结束修改 ---
 
     def initialize(rgss_version)
       @rgss_version = rgss_version
@@ -218,7 +217,6 @@ module Converter
       @visited_clean = {} # 用于处理循环引用
     end
 
-    # export, unpack_recursively, call_unpack_names, clean_for_export 保持不变
     def export(object)
       @visited_unpack.clear
       unpack_recursively(object) # 递归解包字符串
@@ -290,8 +288,7 @@ module Converter
 
   # 从 JSON 解析的数据结构恢复 RVData/RXData 对象 (逻辑保持不变)
   class RvdataRestorer
-    # REDUCED_CLASS_INSTANTIATORS, initialize, restore, restore_value, restore_array, restore_hash,
-    # restore_instance, find_class, instantiate_object, generic_instantiate, populate_attributes 保持不变
+    # ... (REDUCED_CLASS_INSTANTIATORS, initialize, restore, restore_value, restore_array, restore_hash, restore_instance, find_class, instantiate_object, generic_instantiate, populate_attributes 保持不变) ...
     REDUCED_CLASS_INSTANTIATORS = {
       "RPG::Event" => ->(data, restorer) { RPG::Event.new(data["@x"], data["@y"]) },
       "RPG::EventCommand" => ->(data, restorer) { RPG::EventCommand.new(data["@code"], data["@indent"], restorer.restore_value(data["@parameters"])) },
@@ -369,4 +366,191 @@ module Converter
       end
     end
   end # RvdataRestorer
+
+  # 脚本处理器
+  module Scripts
+    METADATA_FILENAME = "Scripts_info.json".freeze
+    SCRIPTS_SUBDIR = "Scripts".freeze
+    # 脚本名称处理时假设的编码 (与 unpack_scripts.rb 保持一致)
+    ASSUMED_NAME_ENCODING = "UTF-8".freeze
+
+    # 解包 Scripts 数据到 .rb 文件和元数据 JSON
+    # scripts_array: 从 Scripts.rxdata/.rvdata/.rvdata2 加载的原始数组
+    # json_output_base_dir: JSON 文件输出的根目录 (例如 "Json")
+    def self.unpack(scripts_array, json_output_base_dir)
+      unless scripts_array.is_a?(Array)
+        raise ArgumentError, "无效的脚本数据：顶层对象不是数组。"
+      end
+
+      scripts_output_dir = File.join(json_output_base_dir, SCRIPTS_SUBDIR)
+      FileUtils.mkdir_p(scripts_output_dir)
+
+      metadata = []
+      scripts_array.each_with_index do |script_entry, index|
+        # 验证条目结构
+        unless script_entry.is_a?(Array) && script_entry.length >= 3
+          $stderr.puts "[警告] 跳过无效的脚本条目 (非数组或长度不足) 在索引 #{index}: #{script_entry.inspect[0..100]}..."
+          next
+        end
+
+        id, name_bytes, compressed_code = script_entry[0], script_entry[1], script_entry[2]
+
+        # 确保 ID 是整数或可转换为整数
+        unless id.is_a?(Integer) || (id.respond_to?(:to_i))
+          $stderr.puts "[警告] 跳过无效的脚本条目 (ID非整数) 在索引 #{index}: ID=#{id.inspect}"
+          next
+        end
+        id = id.to_i # 确保是整数
+
+        # 确保名称是字符串 (即使是空字符串)
+        unless name_bytes.is_a?(String)
+          $stderr.puts "[警告] 跳过无效的脚本条目 (名称非字符串) 在索引 #{index}: Name=#{name_bytes.inspect}"
+          next
+        end
+
+        # --- 修改: 使用 unpack_scripts.rb 的名称处理逻辑 ---
+        name_processed_for_json = "[Conversion Error]" # 默认值
+        begin
+          # 复制原始字节，强制解释为 ASSUMED_NAME_ENCODING (UTF-8)，然后尝试编码为 UTF-8 并替换无效字节
+          # 这模拟了 unpack_scripts.rb 的行为
+          name_processed_for_json = name_bytes.dup.force_encoding(ASSUMED_NAME_ENCODING).encode("UTF-8", invalid: :replace, undef: :replace, replace: "?")
+
+          # 如果替换后变为空字符串，但原始字节非空，使用占位符
+          if name_processed_for_json.empty? && !name_bytes.empty?
+            name_processed_for_json = "[Empty After Replace]"
+          end
+        rescue Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e
+          $stderr.puts "[警告] 无法将脚本名称字节作为 #{ASSUMED_NAME_ENCODING} 处理 (ID: #{id}, Index: #{index})。存储占位符。错误: #{e.message}"
+          name_processed_for_json = "[Encoding Error: #{e.message}]"
+        rescue => e
+          $stderr.puts "[警告] 处理脚本名称时出错 (ID: #{id}, Index: #{index})。存储占位符。错误: #{e.class} - #{e.message}"
+          name_processed_for_json = "[Processing Error: #{e.message}]"
+        end
+        # --- 修改结束 ---
+
+        # 解压代码
+        begin
+          # 处理 compressed_code 为 nil 或非字符串的情况
+          if compressed_code.nil? || !compressed_code.is_a?(String) || compressed_code.empty?
+            script_code = ""
+            if compressed_code.nil? || compressed_code.empty?
+              # $stderr.puts "[调试] 脚本代码为空 (索引 #{index}, ID #{id})" # 可选调试信息
+            else
+              $stderr.puts "[警告] 脚本代码类型不正确 (索引 #{index}, ID #{id}, 类型 #{compressed_code.class})。将写入空文件。"
+            end
+          else
+            script_code = Zlib::Inflate.inflate(compressed_code)
+          end
+        rescue Zlib::Error => e
+          $stderr.puts "[警告] 解压缩脚本代码失败 (索引 #{index}, ID #{id}, 名称 '#{name_processed_for_json}'): #{e.class}: #{e.message}。将写入空文件。"
+          script_code = "" # 写入空文件，而不是跳过
+        rescue TypeError => e # 如果 compressed_code 不是字符串，Zlib 会抛出 TypeError
+          $stderr.puts "[警告] 脚本代码不是有效的压缩字符串 (索引 #{index}, ID #{id}, 名称 '#{name_processed_for_json}'): #{e.class}: #{e.message}。将写入空文件。"
+          script_code = ""
+        end
+
+        # 写入脚本文件
+        script_filename = format("%03d.rb", index)
+        script_filepath = File.join(scripts_output_dir, script_filename)
+        begin
+          # 使用二进制写入以保留原始行尾符等
+          File.binwrite(script_filepath, script_code)
+          # 使用处理后的名称进行日志记录
+          puts "  解包脚本: #{script_filename} (ID: #{id}, Name: '#{name_processed_for_json}')"
+        rescue => e
+          $stderr.puts "[错误] 写入脚本文件 '#{script_filepath}' 失败: #{e.message}"
+          # 继续处理下一个脚本
+        end
+
+        # 添加元数据 (使用处理后的名称)
+        metadata << { id: id, name: name_processed_for_json, index: index }
+      end
+
+      # 写入元数据文件
+      metadata_filepath = File.join(scripts_output_dir, METADATA_FILENAME)
+      begin
+        # 使用 Oj 写入 JSON
+        json_string = Oj.dump(metadata, mode: :compat, indent: 2)
+        File.write(metadata_filepath, json_string, encoding: "UTF-8")
+        puts "  写入脚本元数据: #{METADATA_FILENAME}"
+      rescue => e
+        $stderr.puts "[错误] 写入脚本元数据文件 '#{metadata_filepath}' 失败: #{e.message}"
+      end
+    end
+
+    # 从 .rb 文件和元数据 JSON 封包 Scripts 数据 (保持不变)
+    # scripts_input_dir: 包含 .rb 文件和 Scripts_info.json 的目录
+    # 返回: 重构后的 scripts_array，用于 Marshal.dump
+    def self.pack(scripts_input_dir)
+      metadata_filepath = File.join(scripts_input_dir, METADATA_FILENAME)
+      unless File.exist?(metadata_filepath)
+        raise IOError, "脚本元数据文件未找到: #{metadata_filepath}"
+      end
+
+      begin
+        # 使用 Oj 加载 JSON
+        json_string = File.read(metadata_filepath, encoding: "UTF-8")
+        metadata = Oj.load(json_string, mode: :compat, symbol_keys: false) # 使用 false 避免符号键
+      rescue Oj::ParseError => e
+        raise "解析脚本元数据 JSON 文件 '#{metadata_filepath}' 失败: #{e.message}"
+      rescue => e
+        raise "加载脚本元数据文件 '#{metadata_filepath}' 失败: #{e.message}"
+      end
+
+      unless metadata.is_a?(Array)
+        raise TypeError, "脚本元数据文件 '#{metadata_filepath}' 内容不是有效的 JSON 数组。"
+      end
+
+      # 确定最终数组大小
+      max_index = metadata.map { |info| info["index"] }.compact.max || -1 # 直接使用字符串键
+      scripts_array = Array.new(max_index + 1) # 用 nil 填充
+
+      metadata.each do |script_info|
+        index = script_info["index"]
+        id = script_info["id"]
+        name = script_info["name"]
+
+        # 基本验证
+        unless index.is_a?(Integer) && index >= 0 && id.is_a?(Integer) && name.is_a?(String)
+          $stderr.puts "[警告] 跳过无效的元数据条目: #{script_info.inspect}"
+          next
+        end
+
+        script_filename = format("%03d.rb", index)
+        script_filepath = File.join(scripts_input_dir, script_filename)
+
+        script_code = ""
+        if File.exist?(script_filepath)
+          begin
+            # 使用二进制读取
+            script_code = File.binread(script_filepath)
+            puts "  读取脚本: #{script_filename}"
+          rescue => e
+            $stderr.puts "[警告] 读取脚本文件 '#{script_filepath}' 失败: #{e.message}。将使用空代码。"
+            script_code = ""
+          end
+        else
+          $stderr.puts "[警告] 脚本文件未找到: '#{script_filepath}' (基于元数据)。将使用空代码。"
+          script_code = ""
+        end
+
+        # 压缩代码
+        begin
+          compressed_code = Zlib::Deflate.deflate(script_code)
+        rescue => e
+          $stderr.puts "[错误] 压缩脚本代码失败 (索引 #{index}, ID #{id}, 名称 '#{name}'): #{e.message}。将使用压缩后的空字符串。"
+          compressed_code = Zlib::Deflate.deflate("") # 压缩空字符串作为后备
+        end
+
+        # 构建条目 (使用从 JSON 读取的 ID 和名称)
+        # 注意：这里的 name 已经是经过处理的 UTF-8 字符串（可能含'?'）
+        # 如果需要恢复原始字节，需要在 unpack 时将原始字节也存入 metadata，但这会增加复杂性
+        # 目前保持与 R3EXS pack 行为一致，使用 JSON 中的 name
+        scripts_array[index] = [id, name, compressed_code]
+      end
+
+      puts "脚本封包完成，准备写入 Marshal 文件。"
+      return scripts_array
+    end
+  end # Scripts
 end # Converter
