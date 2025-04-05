@@ -106,7 +106,6 @@ end
 # --- 基础 RPG Maker 类 ---
 
 module RPG
-  class MoveRoute; attr_accessor :repeat, :skippable, :wait, :list; def initialize; @repeat = true; @skippable = false; @wait = false; @list = [RPG::MoveCommand.new]; end; end
   class MoveCommand; attr_accessor :code, :parameters; def initialize(code = 0, parameters = []); @code = code; @parameters = parameters; end; end
   class EventCommand; attr_accessor :code, :indent, :parameters; def unpack_names; return unless @parameters.is_a?(Array); @parameters.map! { |p| p.is_a?(String) ? RPG.unpack_str(p) : p }; end; def initialize(code = 0, indent = 0, parameters = []); @code = code; @indent = indent; @parameters = parameters; end; end
   class MapInfo; attr_accessor :name, :parent_id, :order, :expanded, :scroll_x, :scroll_y; def unpack_names; Utils.unpack_names_for(self, :name); end; def initialize; @name = ""; @parent_id = 0; @order = 0; @expanded = false; @scroll_x = 0; @scroll_y = 0; end; end

@@ -1,23 +1,23 @@
 # 配置文件 for rvdata2json.rb
 
 # 默认 RGSS 版本 (如果命令行未指定且无法从 Game.ini 检测)
-# 可选值: "RGSS2", "RGSS3"
+# 可选值: "RGSS1", "RGSS2", "RGSS3" # <--- 修改: 添加 RGSS1
 rgss_version: "RGSS3"
 
 # 输入文件夹路径 (相对于游戏目录)
-# 处理 RVData -> JSON 时使用
-input_dir_rvdata: "Data_原始" # 存放原始 .rvdata/.rvdata2 文件的目录
-# 处理 JSON -> RVData 时使用
-input_dir_json: "Json"     # 存放 .json 文件的目录
+# 处理 RVData/RXData -> JSON 时使用
+input_dir_rvdata: "Data_原始" # 存放原始 .rxdata/.rvdata/.rvdata2 文件的目录 <--- 修改注释
+# 处理 JSON -> RVData/RXData 时使用
+input_dir_json: "Json"     # 存放 .json 文件的目录 <--- 修改注释
 
 # 输出文件夹路径 (相对于游戏目录)
-# 处理 RVData -> JSON 时的输出目录
-output_dir_json: "Json"     # 转换后 .json 文件的存放目录
-# 处理 JSON -> RVData 时的输出目录
-output_dir_rvdata: "Data"   # 转换后 .rvdata/.rvdata2 文件的存放目录
+# 处理 RVData/RXData -> JSON 时的输出目录
+output_dir_json: "Json"     # 转换后 .json 文件的存放目录 <--- 修改注释
+# 处理 JSON -> RVData/RXData 时的输出目录
+output_dir_rvdata: "Data"   # 转换后 .rxdata/.rvdata/.rvdata2 文件的存放目录 <--- 修改注释
 
 # 需要处理的文件基础名列表 (支持 Ruby 正则表达式)
-# 程序会根据转换方向和 RGSS 版本自动添加正确的扩展名
+# 程序会根据转换方向和 RGSS 版本自动添加正确的扩展名 (.rxdata/.rvdata/.rvdata2) <--- 修改注释
 files:
   - Actors
   - Animations
@@ -30,7 +30,7 @@ files:
   - Skills
   - States
   - System
-  - Tilesets # 仅RGSS3，但无论如何都包括在内；如果未找到，则不会处理
+  - Tilesets # 仅 RGSS3，但包含无害；如果文件 (.rvdata2) 未找到则跳过
   - Troops
   - Weapons
   - Map\d{3}   # 匹配 Map001, Map002, ...
@@ -38,6 +38,6 @@ files:
 # 需要排除的文件基础名列表 (支持 Ruby 正则表达式)
 # 这些文件即使匹配上面的 'files' 列表，也不会被处理
 exclude_files:
-  - Areas      # RGSS2 only, usually not processed
-  - Scripts    # Script data is not handled by this tool
-  - Main       # If Main.rvdata2 exists and should be skipped
+  - Areas      # 仅 RGSS2, 通常不处理
+  - Scripts    # 脚本数据 (Scripts.rxdata/.rvdata2) 应使用独立工具处理 <--- 修改注释
+  - Main       # 如果 Main.rvdata2 等文件存在且应跳过

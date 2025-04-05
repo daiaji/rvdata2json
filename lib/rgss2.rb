@@ -63,6 +63,17 @@ module RPG
     class DropItem; attr_accessor :kind, :item_id, :weapon_id, :armor_id, :denominator; def initialize; @kind = 0; @item_id = 1; @weapon_id = 1; @armor_id = 1; @denominator = 1; end; end
   end
 
+  class MoveRoute
+    attr_accessor :repeat, :skippable, :wait, :list
+
+    def initialize
+      @repeat = true
+      @skippable = false
+      @wait = false # RGSS2 includes wait
+      @list = [RPG::MoveCommand.new] # RPG::MoveCommand is from shared.rb
+    end
+  end
+
   class State # Removed < RPG::BaseItem
     include RPG::StateExtensionsRGSS2
 

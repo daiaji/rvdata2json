@@ -46,46 +46,53 @@ module Utils
     end
   end
 
-  # --- detect_encoding_safe 保持不变 (私有类方法，用于检测文件编码) ---
+  # --- detect_encoding_safe ---
   class << self
     private
 
-    # 安全地检测字符串的编码
-    # str: 需要检测编码的字符串
-    # 返回: Encoding 对象或 nil
+    # 安全地检测字符串的编码，优先BOM，然后rchardet
+    # str: 需要检测编码的字符串 (二进制模式读取的样本)
+    # 返回: 编码名称字符串 (例如 "UTF-8", "Shift_JIS", "GBK") 或 nil
     def detect_encoding_safe(str)
-      return nil if str.nil? || str.empty? # 处理空或nil输入
-      begin
-        sample = str.byteslice(0, 4096) || "" # 取前 4KB 作为样本
-        # 优先检查常见的 UTF-8 和 UTF-16LE
-        return Encoding::UTF_8 if sample.dup.force_encoding("UTF-8").valid_encoding?
-        return Encoding::UTF_16LE if sample.dup.force_encoding("UTF-16LE").valid_encoding?
+      return nil if str.nil? || str.empty?
 
-        # 使用 rchardet 进行检测
-        cd = CharDet.detect(sample)
-        if cd && cd["confidence"] > 0.5 # 如果检测结果置信度较高
-          encoding_name = cd["encoding"].upcase # 获取编码名称并转大写
-          case encoding_name # 根据常见的编码名称返回对应的 Encoding 对象
-          when "GB18030", "GBK", "GB2312"
-            return Encoding.find("GBK") rescue nil # 优先使用 GBK 处理 GB 系列编码
-          when "SHIFT_JIS", "EUC-JP"
-            return Encoding.find(encoding_name) rescue nil # 处理日文编码
-          when "UTF-8"
-            return Encoding::UTF_8
-          when "ASCII"
-            return Encoding::ASCII
-          when "WINDOWS-1252"
-            return Encoding.find("Windows-1252") rescue nil # 处理西欧语系编码
-          else
-            return Encoding.find(encoding_name) rescue nil # 尝试查找其他编码
-          end
+      begin
+        # 1. BOM (Byte Order Mark) 检测
+        #    确保使用 byteslice，因为输入可能是任意字节序列
+        if str.bytesize >= 3 && str.start_with?("\xEF\xBB\xBF".b)
+          puts "[调试] 检测到 UTF-8 BOM" if $DEBUG
+          return "UTF-8"
+          # 可以根据需要添加其他 BOM 检测 (例如 UTF-32)
         end
+
+        # 2. Rchardet 检测 (如果没有 BOM)
+        #    使用较大的样本进行检测
+        sample = str.byteslice(0, 4096) || "" # 确保样本不为 nil
+        cd = CharDet.detect(sample)
+
+        if cd && cd["encoding"] && cd["confidence"] > 0.5 # 检查 encoding 是否存在且置信度足够
+          encoding_name = cd["encoding"]
+          puts "[调试] rchardet 检测到: #{encoding_name} (置信度: #{cd["confidence"]})" if $DEBUG
+          # 直接返回 rchardet 检测到的名称，不做映射
+          # IniFile 通常能处理 rchardet 返回的标准名称
+          return encoding_name unless encoding_name.strip.empty? # 防止返回空字符串
+          puts "[警告] rchardet 返回有效置信度但编码名称为空。" if $DEBUG
+        else
+          puts "[调试] rchardet 检测失败或置信度低 (结果: #{cd.inspect})" if $DEBUG
+        end
+
+        # 3. 如果 BOM 和 rchardet 都失败，返回 nil
+        return nil
       rescue LoadError
+        # 保持原始警告，因为 rchardet 确实是可选的依赖
         puts "[警告] 未找到 rchardet gem，Game.ini 编码检测可能不准确。"
+        return nil # 返回 nil 表示无法检测
       rescue => e
-        puts "[警告] Utils.detect_encoding_safe: 检测编码时出错: #{e.message}"
+        # 记录通用检测错误
+        puts "[警告] Utils.detect_encoding_safe: 检测编码时发生错误: #{e.class}: #{e.message}"
+        # puts e.backtrace.first(5).join("\n") # Debug 时可以取消注释
+        return nil # 返回 nil 表示检测失败
       end
-      nil # 检测失败或置信度低时返回 nil
     end
   end
 end
