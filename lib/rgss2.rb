@@ -1,4 +1,3 @@
-# lib/rgss2.rb
 # 包含 RGSS2 (RPG Maker VX) 特有的类定义或对共享类的修改
 # 修正: RPG::Animation::Frame#initialize 添加 super() 调用
 

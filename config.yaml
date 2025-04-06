@@ -5,20 +5,14 @@
 rgss_version: "RGSS3"
 
 # 输入文件夹路径 (相对于游戏目录)
-# 处理 RVData/RXData -> Source(JSON/Scripts) 时使用
 input_dir_marshal: "Data_原始" # 存放原始 .rxdata/.rvdata/.rvdata2 文件的目录
-# 处理 Source(JSON/Scripts) -> RVData/RXData 时使用
-input_dir_source: "Source" # <--- 重命名并更新默认值: 存放 .json 文件和 Scripts 目录的目录
+input_dir_source: "Source" # 存放 .json 文件和 Scripts 目录的目录
 
 # 输出文件夹路径 (相对于游戏目录)
-# 处理 RVData/RXData -> Source(JSON/Scripts) 时的输出目录
-output_dir_source: "Source" # <--- 重命名并更新默认值: 转换后 .json 文件和 Scripts 目录的存放目录
-# 处理 Source(JSON/Scripts) -> RVData/RXData 时的输出目录
+output_dir_source: "Source" # 转换后 .json 文件和 Scripts 目录的存放目录
 output_dir_marshal: "Data" # 转换后 .rxdata/.rvdata/.rvdata2 文件的存放目录
 
 # 需要处理的文件基础名列表 (所有模式都将作为不区分大小写的 Ruby 正则表达式处理)
-# 程序会根据转换方向和 RGSS 版本自动添加正确的扩展名 (.rxdata/.rvdata/.rvdata2 或 .json/.rb)
-# 注意: "Scripts" 模式会触发特殊的脚本解包/封包逻辑
 files:
   - Actors
   - Animations
@@ -32,14 +26,36 @@ files:
   - Skills
   - States
   - System
-  - Tilesets # 仅 RGSS3，但包含无害；如果文件 (.rvdata2) 未找到则跳过
+  - Tilesets
   - Troops
   - Weapons
   - Map\d{3} # 匹配 Map001, Map002, ...
 
 # 需要排除的文件基础名列表 (所有模式都将作为不区分大小写的 Ruby 正则表达式处理)
-# 这些文件即使匹配上面的 'files' 列表，也不会被处理
 exclude_files:
   - Areas # 仅 RGSS2, 通常不处理
   - Main # 如果 Main.rvdata2 等文件存在且应跳过
-  # - Scripts    # <-- 注意: 如果你想完全跳过脚本处理，可以在这里排除，但通常应该在 files 中包含它来启用功能
+
+# --- 日志配置 ---
+logging:
+  # 要记录的最低严重级别。选项：DEBUG、INFO、WARN、ERROR、FATAL、UNKNOWN
+  # 默认值：INFO (提供足够上下文，但不如 DEBUG 详细)
+  log_level: "ERROR"
+
+  # 是否将日志写入 log_directory 中的文件。
+  # true: 写入文件; false: 仅输出到控制台 (STDERR)
+  # 默认值：false
+  log_to_file: false
+
+  # 日志文件存储的目录（相对于游戏目录 --game-dir）。
+  # 默认值："logs"
+  log_directory: "logs"
+
+  # 文件名格式。{timestamp} 将被替换为 YYYYMMDD_HHMMSS。
+  # 默认值："rvdata2json_{timestamp}.log"
+  log_filename_format: "rvdata2json_{timestamp}.log"
+
+  # 启用控制台的彩色输出（如果控制台支持）。
+  # 默认值：true
+  enable_colors: true
+# ---------------
