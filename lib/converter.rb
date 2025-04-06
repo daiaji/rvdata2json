@@ -808,16 +808,17 @@ module Converter
 
   # --- 脚本处理 模块 ---
   # 负责解包和打包 Scripts.rvdata 文件
+  # --- 脚本处理 模块 ---
   module Scripts
-    METADATA_FILENAME = "Scripts_info.json".freeze # 存储脚本元数据的文件名
-    SCRIPTS_SUBDIR = "Scripts".freeze              # 存放解包后脚本的子目录名
-    ASSUMED_NAME_ENCODING = "UTF-8".freeze         # 假定原始脚本名称的编码
+    METADATA_FILENAME = "Scripts_info.json".freeze
+    SCRIPTS_SUBDIR = "Scripts".freeze
+    ASSUMED_NAME_ENCODING = "UTF-8".freeze
 
     # 解包 Scripts.rvdata
     # @param scripts_array [Array] 从 Scripts.rvdata 加载的数组
-    # @param json_output_base_dir [String] JSON 输出的基础目录
+    # @param scripts_output_directory [String] 脚本文件和元数据输出的目录 (例如 /path/to/Source/Scripts)
     # @raise [ArgumentError] 如果输入数据不是数组
-    def self.unpack(scripts_array, json_output_base_dir)
+    def self.unpack(scripts_array, scripts_output_directory) # <--- 参数名修改为 scripts_output_directory
       # 验证输入类型
       unless scripts_array.is_a?(Array)
         err_msg = "无效的脚本数据: 顶层对象不是数组。"
@@ -825,10 +826,13 @@ module Converter
         raise ArgumentError, err_msg
       end
 
-      # 确定脚本输出目录
-      scripts_output_dir = File.join(json_output_base_dir, SCRIPTS_SUBDIR)
+      # --- 修改点：直接使用传入的目录，不再拼接 ---
+      scripts_output_dir = scripts_output_directory # <--- 直接使用参数值
+      # 移除: scripts_output_dir = File.join(json_output_base_dir, SCRIPTS_SUBDIR)
+      # --- 修改结束 ---
+
       Logging::Log.info "确保脚本输出目录存在: #{scripts_output_dir}"
-      FileUtils.mkdir_p(scripts_output_dir)
+      FileUtils.mkdir_p(scripts_output_dir) # 现在创建的是正确的目录
 
       metadata = [] # 存储脚本元数据
       # 遍历脚本数组
@@ -838,7 +842,6 @@ module Converter
           Logging::Log.warn "跳过索引 #{index} 处无效的脚本条目 (非数组或长度不足): #{script_entry.inspect[0..100]}..."
           next
         end
-
         id, name_bytes, compressed_code = script_entry[0], script_entry[1], script_entry[2]
 
         # 验证 ID 类型
@@ -846,7 +849,7 @@ module Converter
           Logging::Log.warn "跳过索引 #{index} 处无效的脚本条目 (ID 非整数): ID=#{id.inspect}"
           next
         end
-        id = id.to_i # 转换为整数
+        id = id.to_i
 
         # 验证名称类型
         unless name_bytes.is_a?(String)
@@ -857,18 +860,14 @@ module Converter
         # --- 处理脚本名称编码 (用于 JSON 元数据) ---
         name_processed_for_json = "[转换错误]"
         begin
-          # 强制编码为假定编码，然后转换为 UTF-8，替换无效字符
           name_processed_for_json = name_bytes.dup.force_encoding(ASSUMED_NAME_ENCODING).encode("UTF-8", invalid: :replace, undef: :replace, replace: "?")
-          # 处理替换后变为空字符串的情况
           if name_processed_for_json.empty? && !name_bytes.empty?
             name_processed_for_json = "[替换后为空]"
           end
         rescue Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e
-          # 记录编码转换错误
           Logging::Log.warn "无法将脚本名称字节处理为 #{ASSUMED_NAME_ENCODING} (ID: #{id}, Index: #{index})。存储占位符。错误: #{e.message}"
           name_processed_for_json = "[编码错误: #{e.message}]"
         rescue => e
-          # 记录其他处理错误
           Logging::Log.warn "处理脚本名称时出错 (ID: #{id}, Index: #{index})。存储占位符。错误: #{e.class} - #{e.message}"
           name_processed_for_json = "[处理错误: #{e.message}]"
         end
@@ -877,23 +876,18 @@ module Converter
         # --- 解压缩脚本代码 ---
         script_code = ""
         begin
-          # 处理空或无效的压缩代码
           if compressed_code.nil? || !compressed_code.is_a?(String) || compressed_code.empty?
             Logging::Log.debug "脚本代码为空或类型无效 (Index #{index}, ID #{id})" if Logging::Log.debug?
-            # 如果类型不正确，发出警告
             if compressed_code && !compressed_code.is_a?(String)
               Logging::Log.warn "脚本代码类型不正确 (Index #{index}, ID #{id}, Type #{compressed_code.class})。将写入空文件。"
             end
           else
-            # 解压缩
             script_code = Zlib::Inflate.inflate(compressed_code)
           end
         rescue Zlib::Error => e
-          # 记录解压缩错误
           Logging::Log.warn "解压缩脚本代码失败 (Index #{index}, ID #{id}, Name '#{name_processed_for_json}'): #{e.class}: #{e.message}。将写入空文件。"
           script_code = ""
         rescue TypeError => e
-          # 记录非字符串错误
           Logging::Log.warn "脚本代码不是有效的压缩字符串 (Index #{index}, ID #{id}, Name '#{name_processed_for_json}'): #{e.class}: #{e.message}。将写入空文件。"
           script_code = ""
         end
@@ -901,14 +895,15 @@ module Converter
 
         # 生成脚本文件名 (按索引顺序)
         script_filename = format("%03d.rb", index)
-        script_filepath = File.join(scripts_output_dir, script_filename)
+        # *** 现在直接在 scripts_output_dir 下创建文件 ***
+        script_filepath = File.join(scripts_output_dir, script_filename) # 路径现在是正确的
 
         # 写入脚本文件
         begin
           File.binwrite(script_filepath, script_code) # 使用二进制写入以保留原始换行符等
-          Logging::Log.info "  解包脚本: #{script_filename} (ID: #{id}, Name: '#{name_processed_for_json}')"
+          # 更新日志，显示正确的输出目录
+          Logging::Log.info "  解包脚本: #{script_filename} (ID: #{id}, Name: '#{name_processed_for_json}') 到 #{scripts_output_dir}"
         rescue => e
-          # 记录文件写入错误
           Logging::Log.error "写入脚本文件 '#{script_filepath}' 失败: #{e.message}"
         end
 
@@ -917,27 +912,26 @@ module Converter
       end # scripts_array.each end
 
       # --- 写入元数据文件 ---
+      # *** 元数据文件也写入了正确的目录 ***
       metadata_filepath = File.join(scripts_output_dir, METADATA_FILENAME)
       begin
-        # 将元数据数组转换为格式化的 JSON 字符串
         json_string = Oj.dump(metadata, mode: :compat, indent: 2)
-        # 以 UTF-8 编码写入元数据文件
         File.write(metadata_filepath, json_string, encoding: "UTF-8")
-        Logging::Log.info "  写入脚本元数据: #{METADATA_FILENAME}"
+        # 更新日志，显示完整路径
+        Logging::Log.info "  写入脚本元数据: #{metadata_filepath}"
       rescue => e
-        # 记录元数据写入错误
         Logging::Log.error "写入脚本元数据文件 '#{metadata_filepath}' 失败: #{e.message}"
       end
       # --- 元数据写入结束 ---
     end # def unpack end
 
     # 打包脚本文件为 Scripts.rvdata
-    # @param scripts_input_dir [String] 包含脚本文件和元数据文件的目录
+    # @param scripts_input_dir [String] 包含脚本文件和元数据文件的目录 (例如 /path/to/Source/Scripts)
     # @return [Array] 用于 Marshal.dump 的脚本数组
     # @raise [IOError] 如果元数据文件未找到
     # @raise [TypeError] 如果元数据文件内容不是数组
     # @raise [RuntimeError] 如果发生 JSON 解析或其他加载错误
-    def self.pack(scripts_input_dir)
+    def self.pack(scripts_input_dir) # <--- 参数名不变，但含义清晰
       metadata_filepath = File.join(scripts_input_dir, METADATA_FILENAME)
       # 检查元数据文件是否存在
       unless File.exist?(metadata_filepath)
@@ -949,16 +943,13 @@ module Converter
       Logging::Log.info "加载脚本元数据: #{metadata_filepath}"
       metadata = nil
       begin
-        # 加载并解析元数据 JSON 文件
         json_string = File.read(metadata_filepath, encoding: "UTF-8")
         metadata = Oj.load(json_string, mode: :compat, symbol_keys: false)
       rescue Oj::ParseError => e
-        # 处理 JSON 解析错误
         err_msg = "解析脚本元数据 JSON 文件 '#{metadata_filepath}' 失败: #{e.message}"
         Logging::Log.error err_msg
         raise "元数据 JSON 解析错误。详情请查看日志。"
       rescue => e
-        # 处理其他加载错误
         err_msg = "加载脚本元数据文件 '#{metadata_filepath}' 失败: #{e.message}"
         Logging::Log.error err_msg
         raise "加载元数据时出错。详情请查看日志。"
@@ -975,7 +966,7 @@ module Converter
       max_index = metadata.map { |info| info["index"] }.compact.max || -1
       scripts_array = Array.new(max_index + 1) # 用 nil 填充
 
-      Logging::Log.info "开始脚本打包过程..."
+      Logging::Log.info "开始脚本打包过程 (源: #{scripts_input_dir})..."
       # 遍历元数据，读取、压缩并填充脚本数组
       metadata.each do |script_info|
         index = script_info["index"]
@@ -988,7 +979,7 @@ module Converter
           next
         end
 
-        # 构造脚本文件路径
+        # 构造脚本文件路径 (在 scripts_input_dir 下)
         script_filename = format("%03d.rb", index)
         script_filepath = File.join(scripts_input_dir, script_filename)
         script_code = ""
@@ -996,16 +987,13 @@ module Converter
         # 读取脚本文件内容
         if File.exist?(script_filepath)
           begin
-            # 使用二进制读取
             script_code = File.binread(script_filepath)
             Logging::Log.info "  打包脚本: #{script_filename} (ID: #{id}, Name: '#{name}')"
           rescue => e
-            # 记录读取错误
             Logging::Log.warn "读取脚本文件 '#{script_filepath}' 失败: #{e.message}。将使用空代码。"
             script_code = ""
           end
         else
-          # 记录文件未找到错误
           Logging::Log.warn "脚本文件未找到: '#{script_filepath}' (基于元数据)。将使用空代码。"
           script_code = ""
         end
@@ -1015,13 +1003,10 @@ module Converter
         begin
           compressed_code = Zlib::Deflate.deflate(script_code)
         rescue => e
-          # 记录压缩错误
           Logging::Log.error "压缩脚本代码失败 (Index #{index}, ID #{id}, Name '#{name}'): #{e.message}。将使用压缩后的空字符串。"
         end
 
         # 填充脚本数组 [id, name, compressed_code]
-        # 注意: 这里的 name 直接使用从 JSON 中读取的 UTF-8 字符串
-        #       Marshal.dump 会处理其内部编码
         scripts_array[index] = [id, name, compressed_code]
       end # metadata.each end
 

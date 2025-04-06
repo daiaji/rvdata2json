@@ -4,15 +4,42 @@
 # 可选值: "RGSS1", "RGSS2", "RGSS3"
 rgss_version: "RGSS3"
 
-# 输入文件夹路径 (相对于游戏目录)
-input_dir_marshal: "Data_原始" # 存放原始 .rxdata/.rvdata/.rvdata2 文件的目录
-input_dir_source: "Source" # 存放 .json 文件和 Scripts 目录的目录
+# 输入文件夹路径 (相对于基准目录 --base-dir)
+# 解包模式下，如果启用了 archive_processing 且提取成功，则会优先使用基准目录作为输入源。
+input_dir_marshal: "Data" # 存放原始 .rxdata/.rvdata/.rvdata2 文件的目录
+input_dir_source: "Source"    # 存放 .json 文件和 Scripts 目录的目录 (打包模式输入)
 
-# 输出文件夹路径 (相对于游戏目录)
-output_dir_source: "Source" # 转换后 .json 文件和 Scripts 目录的存放目录
-output_dir_marshal: "Data" # 转换后 .rxdata/.rvdata/.rvdata2 文件的存放目录
+# 输出文件夹路径 (相对于基准目录 --base-dir)
+output_dir_source: "Source"    # 输出 .json 文件和 Scripts 目录的目录 (解包模式输出)
+output_dir_marshal: "Data"     # 输出 .rxdata/.rvdata/.rvdata2 文件的目录 (打包模式输出)
 
-# 需要处理的文件基础名列表 (所有模式都将作为不区分大小写的 Ruby 正则表达式处理)
+# --- 存档文件 (RGSSAD/RGSS2A/RGSS3A) 处理设置 ---
+archive_processing:
+  # 是否启用存档提取功能 (true/false)
+  # 在 unpack 模式下，如果为 true 且 C 扩展可用，将尝试提取基准目录下的存档文件到基准目录，
+  # 并将基准目录作为解包的输入源。
+  enabled: true
+
+  # 各版本对应的加密存档文件名。
+  # 工具将会在基准目录 (--base-dir) 查找这些文件。
+  # 如果你的游戏使用了非标准名称，请修改这里。
+  archive_filenames:
+    RGSS1: "Game.rgssad"
+    RGSS2: "Game.rgss2a"
+    RGSS3: "Game.rgss3a"
+
+  # --- 新增 ---
+  # 是否在成功提取后删除原始存档文件 (true/false)
+  # 注意:
+  # - 仅在 'unpack' 模式下且 archive_processing.enabled 为 true 时生效。
+  # - 在独立提取模式 (--extract-archive) 下，此选项总是被视为 false (即从不删除)。
+  delete_archive_after_extraction: true
+  # -----------
+
+# --------------------------------------------
+
+# 要处理的文件基础名列表 (所有模式都将作为不区分大小写的 Ruby 正则表达式处理)
+# 这些规则应用于最终确定的输入目录中的文件。
 files:
   - Actors
   - Animations
@@ -22,7 +49,7 @@ files:
   - Enemies
   - Items
   - MapInfos
-  - Scripts # <-- 这个模式会触发特殊处理
+  - Scripts # <-- 这个模式会触发特殊处理 (打包/解包)
   - Skills
   - States
   - System
@@ -34,28 +61,22 @@ files:
 # 需要排除的文件基础名列表 (所有模式都将作为不区分大小写的 Ruby 正则表达式处理)
 exclude_files:
   - Areas # 仅 RGSS2, 通常不处理
-  - Main # 如果 Main.rvdata2 等文件存在且应跳过
+  # - Main # 如果 Main.rvdata2 等文件存在且应跳过
 
 # --- 日志配置 ---
 logging:
   # 要记录的最低严重级别。选项：DEBUG、INFO、WARN、ERROR、FATAL、UNKNOWN
-  # 默认值：INFO (提供足够上下文，但不如 DEBUG 详细)
   log_level: "ERROR"
 
   # 是否将日志写入 log_directory 中的文件。
-  # true: 写入文件; false: 仅输出到控制台 (STDERR)
-  # 默认值：false
   log_to_file: false
 
-  # 日志文件存储的目录（相对于游戏目录 --game-dir）。
-  # 默认值："logs"
+  # 日志文件存储的目录（相对于基准目录 --base-dir）。
   log_directory: "logs"
 
   # 文件名格式。{timestamp} 将被替换为 YYYYMMDD_HHMMSS。
-  # 默认值："rvdata2json_{timestamp}.log"
   log_filename_format: "rvdata2json_{timestamp}.log"
 
   # 启用控制台的彩色输出（如果控制台支持）。
-  # 默认值：true
   enable_colors: true
 # ---------------

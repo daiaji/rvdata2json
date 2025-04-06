@@ -1,313 +1,473 @@
+# lib/application.rb
+
 # 应用主流程控制
 
-require "optparse"   # 用于解析命令行参数
-require "pathname"   # 用于处理文件路径
-require "find"       # 用于递归查找文件
-require "fileutils"  # 用于文件操作，如创建目录
-require "inifile"    # 用于解析 Game.ini 文件
-require "set"        # 用于高效处理集合
+require "optparse"
+require "pathname"
+require "find"
+require "fileutils"
+require "inifile"
+require "set"
 
 # --- 尽早加载日志模块 ---
 require_relative "logging"
 # -----------------------
 
-require_relative "configuration" # 加载配置管理模块
-require_relative "converter"     # 加载核心转换模块
-require_relative "utils"         # 加载通用工具模块
+# --- 尝试加载 C 扩展 ---
+begin
+  require "rgssad_extractor/rgssad_extractor"
+  RGSSAD_EXTRACTOR_LOADED = true
+rescue LoadError => e
+  RGSSAD_EXTRACTOR_LOADED = false
+end
+# -----------------------
 
-# --- 主应用程序类 ---
+require_relative "configuration"
+require_relative "converter" # Converter 模块包含了 Scripts 子模块
+require_relative "utils"
+
 class Application
-  # 支持的 RGSS 版本列表
   RGSS_VERSIONS = %w[RGSS1 RGSS2 RGSS3].freeze
-  # Scripts 文件的基础名 (用于特殊处理)
   SCRIPTS_BASENAME = "scripts".freeze
+  DEFAULT_STANDALONE_EXTRACT_DIR = "extracted_archive".freeze
 
-  # 初始化应用程序
-  # @param argv [Array<String>] 命令行参数数组
   def initialize(argv)
     @argv = argv
-    # --- 默认选项 ---
     @options = {
-      config: nil,          # 配置文件路径
-      rgss_version: nil,    # RGSS 版本 (nil 表示自动检测)
-      unpack: false,        # 解包模式标志
-      pack: false,          # 封包模式标志
-      game_dir: Dir.pwd,    # 游戏根目录 (默认为当前工作目录)
-      log_level: nil,       # 命令行指定的日志级别 (覆盖配置)
-      log_dir: nil,          # 命令行指定的日志目录 (覆盖配置)
+      config: nil,
+      rgss_version: nil,
+      unpack: false,
+      pack: false,
+      base_dir: nil, # <-- 重命名并初始化为 nil
+      log_level: nil,
+      log_dir: nil,
+      extract_archive_path: nil,
+      extract_output_path: nil,
     }
-    # -----------------
-    @config = nil           # 加载后的配置数据
-    @input_dir = nil        # 输入目录路径
-    @output_dir = nil       # 输出目录路径
-    @file_patterns = []     # 要包含的文件名模式 (正则表达式)
-    @exclude_patterns = []  # 要排除的文件名模式 (正则表达式)
+    @config = nil
+    @input_dir = nil
+    @output_dir = nil
+    @file_patterns = []
+    @exclude_patterns = []
+    @archive_extracted_successfully = false
   end
 
-  # 运行应用程序主流程
   def run
     begin
-      # 1. 解析命令行选项
+      # --- 步骤 1: 解析选项 ---
       parse_options
-      # 2. 加载配置文件
-      load_configuration
-      # 3. 确定游戏根目录
-      determine_game_directory
-      # 4. 设置日志记录器 (传递命令行覆盖选项)
+
+      # --- 步骤 2: 确定基准目录 ---
+      determine_base_directory # <-- 新方法调用
+
+      # --- 步骤 3: 设置日志 (需要基准目录来解析相对日志路径) ---
+      load_configuration # 加载配置以获取日志设置
       Logging.setup_logger(
         @config,
-        @options[:game_dir],
+        @options[:base_dir], # <-- 使用 base_dir
         @options[:log_level],
         @options[:log_dir]
       )
-      # --- 主流程开始 ---
-      Logging::Log.info "应用程序启动..."
-      # 5. 解析配置文件中的文件匹配模式
+      Logging::Log.info "基准目录已确定: #{@options[:base_dir]}"
+
+      # --- 步骤 4: 检查是否为独立提取模式 ---
+      if @options[:extract_archive_path]
+        # === Standalone Extraction Mode ===
+        # 检查 C 扩展
+        Logging::Log.info "检测到独立存档提取模式 (-e)..."
+        log_rgssad_status(check_needed: true)
+        # 执行提取 (不再需要加载配置或设置目录)
+        handle_standalone_extraction
+        Logging::Log.info "独立存档提取操作完成。"
+        exit 0
+        # === End Standalone Mode ===
+      end
+
+      # --- 如果不是独立提取模式，则继续执行常规流程 ---
+      # === Regular Unpack/Pack Mode ===
+      Logging::Log.info "进入常规解包/封包模式..."
+      # 常规模式需要完整配置和设置
+      # (load_configuration 已在上面日志设置前调用)
+      determine_rgss_version # 检测 RGSS 版本
+      setup_directories      # 设置常规输入/输出目录 (相对于 base_dir)
+      log_rgssad_status(check_needed: false) # 检查 C 扩展状态 (非必需)
+
+      # 处理常规解包模式下的隐式提取
+      process_archive_extraction_if_needed
+
+      # 执行核心的解包/封包文件处理
       parse_config_patterns
-      # 6. 确定要使用的 RGSS 版本 (自动检测或强制指定)
-      determine_rgss_version
-      # 7. 验证选项的有效性 (如 unpack/pack 必须二选一)
       validate_options
-      # 8. 加载对应 RGSS 版本的类定义文件 (rgss1/2/3.rb)
       load_rgss_module
-      # 9. 根据模式设置输入/输出目录
-      setup_directories
-      # 10. 处理文件转换
+      adjust_input_directory_for_unpack # 调整输入目录
       process_files
-      Logging::Log.info "处理完成。"
-      # --- 主流程结束 ---
+      Logging::Log.info "常规处理完成。"
+      # === End Regular Mode ===
+
+    rescue SystemExit
+      # Normal exit
     rescue => e
-      # 捕获所有未处理的异常
       begin
-        # 尝试使用日志记录器记录致命错误
         Logging::Log.fatal "执行失败: #{e.message}"
         Logging::Log.error "调用栈:\n#{e.backtrace.join("\n")}"
       rescue
-        # 如果日志记录器本身失败，则回退到 STDERR
         STDERR.puts "[致命错误] 执行失败: #{e.message}"
         STDERR.puts "[错误] 调用栈:\n#{e.backtrace.join("\n")}"
       end
-      exit 1 # 以错误状态退出
+      exit 1
     end
   end
 
   private
 
-  # 解析命令行选项
+  # 解析命令行选项 (修改后)
   def parse_options
     OptionParser.new do |opts|
       opts.banner = "用法: rvdata2json.rb [选项]"
       opts.separator ""
-      opts.separator "基本选项:"
+      opts.separator "常规选项:"
       opts.on("-c", "--config FILE", "指定配置文件路径") { |file| @options[:config] = file }
-      opts.on("-g", "--game-dir DIR", "指定游戏根目录 (默认: 当前目录)") { |dir| @options[:game_dir] = dir }
+      # --- 修改参数 ---
+      opts.on("-b", "--base-dir DIR", "指定基准目录 (用于解析相对路径, 默认: 当前工作目录)") { |dir| @options[:base_dir] = dir }
+      # --- 修改结束 ---
       opts.on("--unpack", "解包: 将 RVData/RXData 文件转换为 JSON/脚本") { @options[:unpack] = true }
       opts.on("--pack", "封包: 将 JSON/脚本 文件打包为 RVData/RXData") { @options[:pack] = true }
 
       opts.separator ""
-      opts.separator "RGSS 版本选项 (默认自动检测):"
+      opts.separator "RGSS 版本选项 (常规模式下默认自动检测):"
       opts.on("--rgss1", "强制使用 RGSS1 (RPG Maker XP)") { @options[:rgss_version] = "RGSS1" }
       opts.on("--rgss2", "强制使用 RGSS2 (RPG Maker VX)") { @options[:rgss_version] = "RGSS2" }
       opts.on("--rgss3", "强制使用 RGSS3 (RPG Maker VX Ace)") { @options[:rgss_version] = "RGSS3" }
 
       opts.separator ""
+      opts.separator "独立存档提取选项:"
+      opts.on("-e", "--extract-archive FILE", "仅提取指定的存档文件 (rgssad/rgss2a/rgss3a)，然后退出。",
+              "  路径可以是绝对路径，或相对于 --base-dir 的相对路径。", # <-- 修改提示
+              "  C 扩展将自动检测存档版本进行解密。",
+              "  (此选项优先于 --unpack 和 --pack)") do |file|
+        @options[:extract_archive_path] = file
+      end
+      opts.on("-o", "--extract-output-dir DIR", "指定独立存档提取的输出目录。",
+              "  路径可以是绝对路径，或相对于 *当前工作目录* 的相对路径。", # <-- 保持不变，独立输出仍基于 pwd
+              "  (如果省略，则在 *当前工作目录* 下创建 '#{DEFAULT_STANDALONE_EXTRACT_DIR}' 目录)") do |dir|
+        @options[:extract_output_path] = dir
+      end
+
+      opts.separator ""
       opts.separator "日志选项:"
-      # 允许的日志级别 (从 Logging 模块获取)
       valid_levels_help = Logging::VALID_LOG_LEVELS.join(", ")
       opts.on("--log-level LEVEL", Logging::VALID_LOG_LEVELS, "设置日志级别 (#{valid_levels_help})", "  (覆盖配置文件)") do |level|
-        @options[:log_level] = level.upcase # 确保是大写以匹配常量
+        @options[:log_level] = level.upcase
       end
-      opts.on("--log-dir DIR", "指定日志文件目录并启用文件日志", "  (相对路径相对于游戏目录，绝对路径按原样使用)", "  (覆盖配置文件)") do |dir|
+      opts.on("--log-dir DIR", "指定日志文件目录并启用文件日志", "  (路径可以是绝对路径，或相对于 --base-dir 的相对路径)", "  (覆盖配置文件)") do |dir| # <-- 修改提示
         @options[:log_dir] = dir
       end
 
       opts.separator ""
       opts.separator "其他:"
       opts.on_tail("-h", "--help", "显示此帮助信息") { puts opts; exit }
-    end.parse!(@argv) # 解析参数，会修改 @argv
+    end.parse!(@argv)
   end
 
   # 加载配置文件
   def load_configuration
     config_loader = Configuration.new(@options[:config])
     @config = config_loader.load
-    # 日志记录配置文件加载情况已移至 Configuration 类内部或由后续的 Logging.setup_logger 处理
+    if config_loader.path && File.exist?(config_loader.path)
+      Logging::Log.debug "配置文件已加载: #{config_loader.path}" if Logging::Log.debug?
+    else
+      Logging::Log.info "未找到配置文件，使用默认配置。"
+    end
+  end
+
+  # 确定并验证基准目录 (新方法)
+  def determine_base_directory
+    if @options[:base_dir].nil?
+      # 如果命令行未指定 -b/--base-dir，则使用当前工作目录
+      @options[:base_dir] = Dir.pwd
+      Logging::Log.debug "未指定 --base-dir，使用当前工作目录作为基准目录: #{@options[:base_dir]}"
+    else
+      # 如果指定了，则解析为绝对路径
+      @options[:base_dir] = File.expand_path(@options[:base_dir])
+      Logging::Log.debug "使用指定的基准目录: #{@options[:base_dir]}"
+    end
+
+    # 验证基准目录是否存在
+    unless Dir.exist?(@options[:base_dir])
+      raise "错误：指定的基准目录不存在: #{@options[:base_dir]}"
+    end
+    # 最终的基准目录日志记录移到 run 方法中 setup_logger 之后
+  end
+
+  # 记录 C 扩展加载状态并检查是否必需
+  def log_rgssad_status(check_needed: false)
+    unless RGSSAD_EXTRACTOR_LOADED
+      Logging::Log.warn "未找到或无法加载 RGSSAD C 扩展 ('rgssad_extractor')。"
+      Logging::Log.warn "存档提取功能将不可用。请确保已编译 C 扩展。"
+      if check_needed
+        Logging::Log.error "错误：当前操作需要存档提取功能，但 C 扩展不可用。请先编译 C 扩展。"
+        raise "存档提取功能不可用，无法继续。"
+      end
+    else
+      Logging::Log.debug "RGSSAD C 扩展已加载。"
+    end
+  end
+
+  # 确定要使用的 RGSS 版本 (常规模式需要)
+  # 注意：Game.ini 的检测现在基于 base_dir
+  def determine_rgss_version
+    Logging::Log.debug "确定 RGSS 版本..." if Logging::Log.debug?
+    if @options[:rgss_version]
+      Logging::Log.info "RGSS 版本由命令行强制指定: #{@options[:rgss_version]}"
+      return
+    end
+    begin
+      detected_version = detect_rgss_version_from_game_ini # 检测逻辑不变，但路径基于 base_dir
+      if detected_version && RGSS_VERSIONS.include?(detected_version)
+        @options[:rgss_version] = detected_version
+        Logging::Log.info "从 Game.ini (位于基准目录) 自动检测到 RGSS 版本: #{@options[:rgss_version]}"
+      else
+        raise "无法从 Game.ini (位于基准目录) 推断出有效的 RGSS 版本。"
+      end
+    rescue => e
+      Logging::Log.warn "自动检测 RGSS 版本失败: #{e.message}"
+      fallback_version = @config["rgss_version"]
+      unless RGSS_VERSIONS.include?(fallback_version)
+        raise "配置文件中的 rgss_version '#{fallback_version}' 无效。支持: #{RGSS_VERSIONS.join(", ")}"
+      end
+      @options[:rgss_version] = fallback_version
+      Logging::Log.info "回退到配置文件中的 RGSS 版本: #{@options[:rgss_version]}"
+    end
+    Logging::Log.debug "最终 RGSS 版本: #{@options[:rgss_version]}" if Logging::Log.debug?
+  end
+
+  # 从 Game.ini 文件检测 RGSS 版本 (修改后 - 基于 base_dir)
+  def detect_rgss_version_from_game_ini
+    game_ini_path = File.join(@options[:base_dir], "Game.ini") # <-- 使用 base_dir
+    raise "在基准目录中未找到 Game.ini 用于版本检测" unless File.exist?(game_ini_path) # <-- 更新错误消息
+    encoding = detect_file_encoding(game_ini_path)
+    Logging::Log.debug "尝试使用编码 '#{encoding}' 加载 Game.ini" if Logging::Log.debug?
+    ini_file = nil
+    begin
+      ini_file = IniFile.load(game_ini_path, encoding: encoding)
+    rescue => e
+      Logging::Log.warn "使用编码 '#{encoding}' 加载 Game.ini 失败: #{e.message}。尝试 UTF-8..."
+      begin; ini_file = IniFile.load(game_ini_path, encoding: "UTF-8");       rescue => e_utf8; raise "无法加载或解析 Game.ini: #{e.message} / #{e_utf8.message}"; end
+    end
+    rtp_key = ini_file["Game"]["RTP"] rescue nil
+    rtp1_key = ini_file["Game"]["RTP1"] rescue nil
+    if rtp_key; rtp_value = rtp_key.strip.downcase; case rtp_value
+    when /rpgvxace/; return "RGSS3"
+    when /rpgvx/; return "RGSS2"
+    end; Logging::Log.warn "未知 RTP 值 '#{rtp_value}'";     end
+    if rtp1_key; rtp1_value = rtp1_key.strip.downcase; return "RGSS1" if rtp1_value == "standard"; Logging::Log.warn "未知 RTP1 值 '#{rtp1_value}'"; end
+    raise "无法从 Game.ini 推断 RGSS 版本。"
+  end
+
+  # 检测文件编码
+  def detect_file_encoding(file_path)
+    begin; content_sample = File.binread(file_path, 4096) || ""; detected = Utils.send(:detect_encoding_safe, content_sample); return detected || "UTF-8";     rescue => e; Logging::Log.warn "检测 '#{File.basename(file_path)}' 编码出错: #{e.message}. 假定 UTF-8."; return "UTF-8"; end
+  end
+
+  # 设置常规模式的目录 (修改后 - 基于 base_dir)
+  def setup_directories
+    input_dir_key = @options[:unpack] ? "input_dir_marshal" : "input_dir_source"
+    output_dir_key = @options[:unpack] ? "output_dir_source" : "output_dir_marshal"
+
+    # 解析常规输入输出目录 (相对于 base_dir)
+    @input_dir = File.expand_path(@config[input_dir_key], @options[:base_dir]) # <-- 使用 base_dir
+    @output_dir = File.expand_path(@config[output_dir_key], @options[:base_dir]) # <-- 使用 base_dir
+
+    Logging::Log.info "常规输入目录 (初始): #{@input_dir}"
+    Logging::Log.info "常规输出目录: #{@output_dir}"
+  end
+
+  # 统一处理存档提取的入口方法 (只处理隐式提取)
+  def process_archive_extraction_if_needed
+    # Standalone extraction is handled earlier in run method.
+    # This method now only handles implicit extraction for unpack mode.
+
+    return unless @options[:unpack] # Only run in unpack mode
+
+    archive_config = @config["archive_processing"]
+    # Only run if enabled and C extension loaded
+    return unless archive_config["enabled"] && RGSSAD_EXTRACTOR_LOADED
+
+    # Implicit extraction logic (calls perform_implicit_unpack_extraction)
+    perform_implicit_unpack_extraction
+  end
+
+  # 处理独立存档提取逻辑 (修改后 - 输入路径基于 base_dir)
+  def handle_standalone_extraction
+    Logging::Log.info "进入独立存档提取模式。"
+    Logging::Log.info "C 扩展将自动检测存档版本并进行解密。"
+
+    # --- 修改点：输入路径基于 base_dir ---
+    input_archive_path = File.expand_path(@options[:extract_archive_path], @options[:base_dir])
+    Logging::Log.debug "独立提取：解析输入存档路径为: #{input_archive_path}"
+    # --- 修改结束 ---
+
+    # 输出目录逻辑不变 (基于 pwd 或绝对路径)
+    output_dir_path = nil
+    if @options[:extract_output_path] && !@options[:extract_output_path].empty?
+      user_path = @options[:extract_output_path]
+      path_obj = Pathname.new(user_path)
+      if path_obj.absolute?
+        output_dir_path = user_path
+        Logging::Log.debug "独立提取：使用命令行指定的绝对输出目录: #{output_dir_path}"
+      else
+        output_dir_path = File.expand_path(user_path, Dir.pwd)
+        Logging::Log.debug "独立提取：使用命令行指定的相对输出目录 '#{user_path}'，解析为: #{output_dir_path}"
+      end
+    else
+      output_dir_path = File.expand_path(DEFAULT_STANDALONE_EXTRACT_DIR, Dir.pwd)
+      Logging::Log.debug "独立提取：未指定输出目录，使用默认名称 '#{DEFAULT_STANDALONE_EXTRACT_DIR}'，解析为: #{output_dir_path}"
+    end
+    Logging::Log.info "独立提取：最终输出目录: #{output_dir_path}"
+
+    # --- REMOVED: 不再需要调用 find_archive_filename 或发出警告 ---
+
+    # 调用核心提取逻辑
+    extraction_successful = perform_extraction_core(input_archive_path, output_dir_path, File.basename(input_archive_path), "独立提取")
+
+    unless extraction_successful
+      raise "独立存档提取失败。"
+    end
+
+    Logging::Log.info "独立提取模式：成功提取存档 '#{File.basename(input_archive_path)}'。"
+    Logging::Log.info "注意：在独立提取模式下，即使配置中设置为 true，也不会删除原始存档文件。"
+  end
+
+  # 执行常规解包流程中的隐式提取 (修改后 - 路径基于 base_dir)
+  def perform_implicit_unpack_extraction
+    archive_filename = find_archive_filename
+    return Logging::Log.warn "常规解包流程：无法根据 RGSS 版本 (#{@options[:rgss_version]}) 确定存档文件名，跳过提取。" unless archive_filename
+
+    archive_path = File.join(@options[:base_dir], archive_filename) # <-- 基于 base_dir
+    return Logging::Log.info "常规解包流程：未找到预期的存档文件 '#{archive_filename}' (在基准目录中)，跳过提取。" unless File.exist?(archive_path)
+
+    target_extract_dir = @options[:base_dir] # <-- 提取到 base_dir
+    Logging::Log.info "常规解包流程：找到存档文件 '#{archive_filename}'，开始提取到基准目录 '#{target_extract_dir}' (C扩展将自动检测版本)..."
+
+    # 调用核心提取逻辑
+    @archive_extracted_successfully = perform_extraction_core(archive_path, target_extract_dir, archive_filename, "常规解包提取")
+
+    # 记录结果并处理删除
+    if @archive_extracted_successfully
+      Logging::Log.info "常规解包流程：存档提取成功完成。"
+
+      # --- 新增: 创建项目文件 ---
+      begin
+        project_filename = nil
+        project_content = nil
+        case @options[:rgss_version]
+        when "RGSS1"
+          project_filename = "Game.rxproj"
+          project_content = "RPGXP 1.03"
+        when "RGSS2"
+          project_filename = "Game.rvproj"
+          project_content = "RPGVX 1.02"
+        when "RGSS3"
+          project_filename = "Game.rvproj2"
+          project_content = "RPGVXAce 1.02"
+        end
+
+        if project_filename && project_content
+          project_filepath = File.join(@options[:base_dir], project_filename)
+          Logging::Log.info "创建项目文件: #{project_filepath}"
+          # 使用 UTF-8 编码写入， File.write 默认使用 LF 或系统默认，但对单行无换行符的内容影响不大
+          File.write(project_filepath, project_content, encoding: "UTF-8")
+          Logging::Log.info "成功创建项目文件: #{project_filename}"
+        else
+          Logging::Log.warn "无法确定要创建的项目文件 (未知 RGSS 版本: #{@options[:rgss_version]})"
+        end
+      rescue SystemCallError, IOError => e
+        # 在错误日志中包含基准目录信息以便调试
+        Logging::Log.error "创建项目文件 '#{project_filename || "未知"}' (位于基准目录 '#{@options[:base_dir]}') 失败: #{e.message}"
+      rescue => e
+        Logging::Log.error "创建项目文件时发生意外错误: #{e.class}: #{e.message}"
+      end
+      # --- 项目文件创建结束 ---
+
+      # --- 原有的存档删除逻辑 ---
+      if @config["archive_processing"]["delete_archive_after_extraction"]
+        Logging::Log.info "配置要求删除存档，尝试删除: #{archive_path}"
+        begin
+          FileUtils.rm(archive_path)
+          Logging::Log.info "成功删除原始存档文件: #{archive_filename}"
+        rescue SystemCallError => e
+          Logging::Log.error "删除存档文件 '#{archive_path}' 失败: #{e.message}"
+        rescue => e
+          Logging::Log.error "删除存档文件 '#{archive_path}' 时发生意外错误: #{e.class}: #{e.message}"
+        end
+      else
+        Logging::Log.info "配置未要求删除存档，保留文件: #{archive_filename}"
+      end
+    else
+      Logging::Log.error "常规解包流程：存档提取失败，后续将尝试使用原始输入目录。"
+    end
+  end
+
+  # 根据 RGSS 版本查找存档文件名
+  # 常规模式仍然需要这个来定位文件
+  def find_archive_filename
+    archive_config = @config["archive_processing"]
+    filename = archive_config["archive_filenames"][@options[:rgss_version]]
+    return filename if filename && !filename.empty?
+    nil
+  end
+
+  # 核心提取逻辑
+  # 调用 C 扩展，由 C 扩展负责内部版本检测
+  def perform_extraction_core(input_path, output_path, log_filename, context_str)
+    unless File.exist?(input_path)
+      Logging::Log.error "#{context_str}：错误：输入存档文件不存在: '#{input_path}'"
+      return false
+    end
+    if Dir.exist?(output_path)
+      Logging::Log.info "#{context_str}：目标提取目录 '#{output_path}' 已存在。"
+    else
+      Logging::Log.info "#{context_str}：目标提取目录 '#{output_path}' 不存在，将由提取器创建。"
+    end
+    begin
+      verbose_extraction = Logging::Log.debug?
+      # 调用 C 扩展，它会自己检测版本
+      RgssadExtractor.extract_archive(input_path, output_path, verbose_extraction)
+      return true # 成功
+    rescue => e
+      log_extraction_error(e, log_filename) # 记录具体错误
+      return false # 失败
+    end
   end
 
   # 解析配置文件中的文件和排除模式
   def parse_config_patterns
     @file_patterns = (@config["files"] || []).map do |pattern|
       begin
-        # 将字符串模式编译为不区分大小写的正则表达式
         Regexp.new(pattern, Regexp::IGNORECASE)
       rescue RegexpError => e
-        # 处理无效的正则表达式
         raise "配置错误: 'files' 中的模式 '#{pattern}' 不是有效的正则表达式: #{e.message}"
       end
     end
     @exclude_patterns = (@config["exclude_files"] || []).map do |pattern|
       begin
-        # 将字符串模式编译为不区分大小写的正则表达式
         Regexp.new(pattern, Regexp::IGNORECASE)
       rescue RegexpError => e
-        # 处理无效的正则表达式
         raise "配置错误: 'exclude_files' 中的模式 '#{pattern}' 不是有效的正则表达式: #{e.message}"
       end
     end
-    Logging::Log.debug "文件包含模式已加载: #{@file_patterns.inspect}" if Logging::Log.debug?
-    Logging::Log.debug "文件排除模式已加载: #{@exclude_patterns.inspect}" if Logging::Log.debug?
+    Logging::Log.debug "文件包含模式: #{@file_patterns.inspect}" if Logging::Log.debug?
+    Logging::Log.debug "文件排除模式: #{@exclude_patterns.inspect}" if Logging::Log.debug?
   end
 
-  # 确定并验证游戏根目录
-  def determine_game_directory
-    # 将路径转换为绝对路径
-    @options[:game_dir] = File.expand_path(@options[:game_dir])
-    # 检查目录是否存在
-    unless Dir.exist?(@options[:game_dir])
-      raise "指定的游戏目录不存在: #{@options[:game_dir]}"
-    end
-    # 日志记录目录信息将在 Logging.setup_logger 中处理
-  end
-
-  # 确定要使用的 RGSS 版本
-  def determine_rgss_version
-    Logging::Log.debug "确定 RGSS 版本..." if Logging::Log.debug?
-
-    # 如果命令行已强制指定版本，则直接使用
-    if @options[:rgss_version]
-      Logging::Log.info "RGSS 版本由命令行强制指定: #{@options[:rgss_version]}"
-      return
-    end
-
-    # 尝试从 Game.ini 文件自动检测
-    begin
-      detected_version = detect_rgss_version_from_game_ini
-      if detected_version && RGSS_VERSIONS.include?(detected_version)
-        @options[:rgss_version] = detected_version
-        Logging::Log.info "从 Game.ini 自动检测到 RGSS 版本: #{@options[:rgss_version]}"
-      else
-        # 检测到了但不是支持的版本 (理论上不太可能发生)
-        raise "无法从 Game.ini 推断出有效的 RGSS 版本。"
-      end
-    rescue => e
-      # 自动检测失败，记录警告并回退到配置文件中的设置
-      Logging::Log.warn "自动检测 RGSS 版本失败: #{e.message}"
-      fallback_version = @config["rgss_version"]
-      # 验证配置文件中的版本是否有效
-      unless RGSS_VERSIONS.include?(fallback_version)
-        raise "配置文件中的 rgss_version '#{fallback_version}' 无效。支持的版本: #{RGSS_VERSIONS.join(", ")}"
-      end
-      @options[:rgss_version] = fallback_version
-      Logging::Log.info "回退到配置文件中的 RGSS 版本: #{@options[:rgss_version]}"
-    end
-
-    Logging::Log.debug "最终确定的 RGSS 版本: #{@options[:rgss_version]}" if Logging::Log.debug?
-  end
-
-  # 从 Game.ini 文件检测 RGSS 版本
-  # @return [String, nil] 检测到的 RGSS 版本 ("RGSS1", "RGSS2", "RGSS3") 或 nil
-  # @raise [RuntimeError] 如果 Game.ini 未找到或无法解析/推断版本
-  def detect_rgss_version_from_game_ini
-    game_ini_path = File.join(@options[:game_dir], "Game.ini")
-    # 检查 Game.ini 文件是否存在
-    raise "在游戏目录中未找到 Game.ini" unless File.exist?(game_ini_path)
-
-    # 检测文件编码 (优先使用 BOM 或 rchardet)
-    encoding = detect_file_encoding(game_ini_path)
-    Logging::Log.debug "尝试使用检测到的编码 '#{encoding}' 加载 Game.ini" if Logging::Log.debug?
-
-    ini_file = nil
-    begin
-      # 加载 INI 文件
-      ini_file = IniFile.load(game_ini_path, encoding: encoding)
-    rescue Encoding::UndefinedConversionError, Encoding::InvalidByteSequenceError => e
-      # 如果使用检测到的编码失败，记录警告并尝试使用 UTF-8
-      Logging::Log.warn "使用编码 '#{encoding}' 加载 Game.ini 失败: #{e.message}。尝试使用 UTF-8..."
-      begin
-        ini_file = IniFile.load(game_ini_path, encoding: "UTF-8")
-      rescue => e_utf8
-        # 如果 UTF-8 也失败，则抛出错误
-        raise "无法加载或解析 Game.ini (尝试了 '#{encoding}' 和 UTF-8): 初始错误 (#{e.message}), UTF-8 尝试错误 (#{e_utf8.message})"
-      end
-    rescue ArgumentError => e
-      # 处理编码不兼容或无效字节序列错误
-      if e.message.include?("invalid byte sequence") || e.message.include?("incompatible character encodings")
-        raise "加载 Game.ini 时发现不兼容的编码 '#{encoding}' 或无效序列: #{e.message}"
-      else
-        raise # 重新抛出其他 ArgumentError
-      end
-    rescue => e
-      # 捕获其他加载/解析错误
-      raise "加载或解析 Game.ini 失败 (使用编码: #{encoding}): #{e.class} - #{e.message}"
-    end
-
-    # --- 根据 RTP 键推断 RGSS 版本 ---
-    rtp_key = ini_file["Game"]["RTP"] rescue nil    # VX Ace 和 VX 使用
-    rtp1_key = ini_file["Game"]["RTP1"] rescue nil # XP 使用
-
-    if rtp_key
-      rtp_value = rtp_key&.strip&.downcase
-      Logging::Log.debug "Game.ini RTP 值: #{rtp_value.inspect}" if Logging::Log.debug?
-      case rtp_value
-      when /rpgvxace/ then return "RGSS3" # 包含 "rpgvxace" 字符串 -> RGSS3
-      when /rpgvx/ then return "RGSS2"    # 包含 "rpgvx" 字符串 -> RGSS2
-      end
-      # 如果 RTP 值无法识别，记录警告并继续检查 RTP1
-      Logging::Log.warn "无法从 RTP 值 '#{rtp_value}' 推断 RGSS 版本。检查 RTP1..."
-    end
-
-    if rtp1_key
-      rtp1_value = rtp1_key&.strip&.downcase
-      Logging::Log.debug "Game.ini RTP1 值: #{rtp1_value.inspect}" if Logging::Log.debug?
-      # 如果 RTP1 值为 "standard" -> RGSS1
-      return "RGSS1" if rtp1_value == "standard"
-      # 如果 RTP1 值无法识别
-      Logging::Log.warn "无法从 RTP1 值 '#{rtp1_value}' 推断 RGSS 版本 (预期为 'Standard')..."
-    end
-
-    # 如果两个键都无法推断出版本
-    raise "无法从 Game.ini 中的 RTP 或 RTP1 推断 RGSS 版本。"
-  end
-
-  # 检测文件编码 (优先使用 BOM 或 rchardet)
-  # @param file_path [String] 文件路径
-  # @return [String] 检测到的编码名称 (如 "UTF-8", "Shift_JIS") 或默认 "UTF-8"
-  def detect_file_encoding(file_path)
-    begin
-      # 读取文件开头的一小部分进行检测 (最多 4KB)
-      content_sample = File.binread(file_path, 4096) || ""
-      # 调用 Utils 中的安全编码检测方法
-      detected_encoding_name = Utils.send(:detect_encoding_safe, content_sample)
-
-      if detected_encoding_name
-        Logging::Log.debug "Utils.detect_encoding_safe 为 '#{File.basename(file_path)}' 返回编码 '#{detected_encoding_name}'" if Logging::Log.debug?
-        return detected_encoding_name
-      else
-        # 如果无法可靠检测，则默认使用 UTF-8
-        Logging::Log.warn "无法可靠检测 '#{File.basename(file_path)}' 的编码。假定为 UTF-8。"
-        return "UTF-8"
-      end
-    rescue SystemCallError => e
-      # 处理文件读取错误
-      Logging::Log.error "读取文件 '#{file_path}' 进行编码检测时出错: #{e.message}。假定为 UTF-8。"
-      return "UTF-8"
-    rescue => e
-      # 处理其他意外错误
-      Logging::Log.warn "检测文件 '#{file_path}' 编码时发生意外错误: #{e.class} - #{e.message}。假定为 UTF-8。"
-      return "UTF-8"
-    end
-  end
-
-  # 验证命令行选项和配置
+  # 验证常规模式选项
   def validate_options
-    Logging::Log.debug "验证选项..." if Logging::Log.debug?
-    # 必须指定 --unpack 或 --pack 中的一个，且只能指定一个
+    Logging::Log.debug "验证常规模式选项..." if Logging::Log.debug?
     unless @options[:unpack] ^ @options[:pack]
-      raise "必须指定 --unpack 或 --pack 中的一个。"
+      raise "错误：常规模式下必须指定 --unpack 或 --pack 中的一个。"
     end
-    # 验证 RGSS 版本是否有效
     unless RGSS_VERSIONS.include?(@options[:rgss_version])
-      raise "无效的 RGSS 版本: '#{@options[:rgss_version]}'. 支持的版本: #{RGSS_VERSIONS.join(", ")}"
+      raise "错误：无效的 RGSS 版本: '#{@options[:rgss_version]}'."
     end
     Logging::Log.info "操作模式: #{@options[:unpack] ? "解包 (UNPACK)" : "封包 (PACK)"}"
     Logging::Log.info "确认的 RGSS 版本: #{@options[:rgss_version]}"
@@ -315,257 +475,186 @@ class Application
 
   # 加载对应 RGSS 版本的库文件
   def load_rgss_module
-    begin
-      # 根据版本号构造文件名 (e.g., "rgss3")
-      rgss_lib_file = @options[:rgss_version].downcase
-      # 加载对应的库文件
-      require_relative rgss_lib_file
-      Logging::Log.info "已加载 RGSS 定义: lib/#{rgss_lib_file}.rb"
-    rescue LoadError => e
-      # 处理加载失败错误
-      raise "加载 RGSS 定义文件 'lib/#{rgss_lib_file}.rb' 失败: #{e.message}"
+    begin; require_relative @options[:rgss_version].downcase; Logging::Log.info "已加载 RGSS 定义: lib/#{@options[:rgss_version].downcase}.rb";     rescue LoadError => e; raise "加载 RGSS 定义失败: #{e.message}"; end
+  end
+
+  # 常规流程中调整解包输入目录 (在提取之后调用) (修改后 - 基于 base_dir)
+  def adjust_input_directory_for_unpack
+    return unless @options[:unpack]
+    return unless @config["archive_processing"]["enabled"]
+
+    if @archive_extracted_successfully
+      # --- 修改点：检查 base_dir 是否存在 ---
+      unless Dir.exist?(@options[:base_dir])
+        Logging::Log.error "错误：存档提取成功但基准目录 '#{@options[:base_dir]}' 不存在！"
+        original_input_dir = File.expand_path(@config["input_dir_marshal"], @options[:base_dir]) # 解析仍基于 base_dir
+        raise "关键目录丢失，无法继续。" unless Dir.exist?(original_input_dir)
+        Logging::Log.warn "将回退到原始输入目录 '#{original_input_dir}'。"
+        @input_dir = original_input_dir
+        return
+      end
+      # --- 修改点：使用 base_dir 作为输入源 ---
+      Logging::Log.info "解包模式：将使用基准目录 '#{@options[:base_dir]}' 作为存档提取后的输入源。"
+      @input_dir = @options[:base_dir]
+    else
+      # 提取失败或未执行，使用配置的 input_dir_marshal (相对于 base_dir 解析)
+      original_input_dir = File.expand_path(@config["input_dir_marshal"], @options[:base_dir]) # 解析基于 base_dir
+      Logging::Log.warn "解包模式：存档提取未成功/未执行，将使用原始输入目录 '#{original_input_dir}'。"
+      raise "错误：存档提取失败/未执行，且原始输入目录 '#{original_input_dir}' 也不存在。" unless Dir.exist?(original_input_dir)
+      @input_dir = original_input_dir
     end
+    Logging::Log.info "最终确定的输入目录 (解包): #{@input_dir}"
   end
 
-  # 设置输入和输出目录路径
-  def setup_directories
-    # 根据操作模式确定配置文件中使用的键名
-    input_dir_key = @options[:unpack] ? "input_dir_marshal" : "input_dir_source"
-    output_dir_key = @options[:unpack] ? "output_dir_source" : "output_dir_marshal"
-
-    # 从配置中读取目录名，并转换为相对于游戏根目录的绝对路径
-    @input_dir = File.expand_path(@config[input_dir_key], @options[:game_dir])
-    @output_dir = File.expand_path(@config[output_dir_key], @options[:game_dir])
-
-    Logging::Log.info "输入目录: #{@input_dir}"
-    Logging::Log.info "输出目录: #{@output_dir}"
-
-    # 验证输入目录是否存在
-    raise "输入目录不存在: #{@input_dir}" unless Dir.exist?(@input_dir)
-    # 输出目录将在写入时由 FileUtils.mkdir_p 自动创建，无需在此检查
-  end
-
-  # 处理文件转换的核心逻辑
+  # 处理文件转换的核心逻辑 (修改后 - 路径基于 base_dir)
   def process_files
-    scripts_processed = false # 标记是否处理了 Scripts 文件
+    scripts_processed = false
+    file_list, input_extension, output_extension = get_file_list # get_file_list 内部已基于 @input_dir
 
-    # 获取要处理的文件列表、输入扩展名、输出扩展名
-    file_list, input_extension, output_extension = get_file_list
-
-    # --- 特殊处理：打包模式下的脚本目录 ---
+    # --- 脚本打包 ---
     if @options[:pack]
-      scripts_input_dir = File.join(@input_dir, Converter::Scripts::SCRIPTS_SUBDIR)
-      if Dir.exist?(scripts_input_dir)
+      # 源目录: config["input_dir_source"] 相对于 base_dir
+      source_scripts_dir = File.expand_path(File.join(@config["input_dir_source"], Converter::Scripts::SCRIPTS_SUBDIR), @options[:base_dir]) # <-- 使用 base_dir
+      if Dir.exist?(source_scripts_dir)
         begin
-          # 根据 RGSS 版本确定输出的 Scripts 文件扩展名
-          rvdata_extension = case @options[:rgss_version]
-            when "RGSS1" then ".rxdata"
-            when "RGSS2" then ".rvdata"
-            when "RGSS3" then ".rvdata2"
-            else raise "内部错误: 打包脚本时未知的 RGSS 版本 #{@options[:rgss_version]}"
+          rvdata_ext = case @options[:rgss_version]
+            when "RGSS1"; ".rxdata"
+            when "RGSS2"; ".rvdata"
+            when "RGSS3"; ".rvdata2"
+            else raise "打包脚本时未知版本"
             end
-          # 构造输出文件路径 (首字母大写)
-          scripts_output_file = File.join(@output_dir, SCRIPTS_BASENAME.capitalize + rvdata_extension)
-          Logging::Log.info "检测到脚本输入目录，开始打包脚本: #{scripts_input_dir} -> #{File.basename(scripts_output_file)}"
-          FileUtils.mkdir_p(File.dirname(scripts_output_file)) # 确保输出目录存在
-
-          # 调用 Converter::Scripts.pack 进行打包
-          packed_scripts_array = Converter::Scripts.pack(scripts_input_dir)
-
-          if packed_scripts_array.nil?
-            Logging::Log.warn "脚本打包返回 nil，跳过写入 #{File.basename(scripts_output_file)}。"
-          else
-            # 将打包后的数组写入 Marshal 文件
-            Converter::IO.write_marshal_data(scripts_output_file, packed_scripts_array)
-            Logging::Log.info "  打包脚本输出: #{scripts_output_file}"
-            scripts_processed = true
-          end
-        rescue => e
-          # 记录脚本打包过程中的错误
-          Logging::Log.error "处理脚本打包失败 (目录: #{scripts_input_dir}):"
-          Logging::Log.error "  错误: #{e.class}: #{e.message}"
-          e.backtrace.first(10).each { |line| Logging::Log.error "    #{line}" }
-          raise # 重新抛出异常，中断执行
-        end
+          # 输出文件: 在 @output_dir (已基于 base_dir 解析) 下
+          scripts_output_file = File.join(@output_dir, SCRIPTS_BASENAME.capitalize + rvdata_ext)
+          Logging::Log.info "检测到脚本源目录，打包: #{source_scripts_dir} -> #{File.basename(scripts_output_file)}"
+          FileUtils.mkdir_p(File.dirname(scripts_output_file))
+          packed_array = Converter::Scripts.pack(source_scripts_dir)
+          raise "脚本打包返回 nil" if packed_array.nil?
+          Converter::IO.write_marshal_data(scripts_output_file, packed_array)
+          Logging::Log.info "  打包脚本输出: #{scripts_output_file}"
+          scripts_processed = true
+        rescue => e; log_processing_error(e, "脚本打包", source_scripts_dir); raise;         end
       else
-        # 如果脚本输入目录不存在，则跳过打包
-        Logging::Log.info "脚本输入目录未找到: #{scripts_input_dir}。跳过脚本打包。"
+        Logging::Log.info "脚本源目录未找到: #{source_scripts_dir}。跳过脚本打包。"
       end
-
-      # 从待处理文件列表中移除脚本目录下的所有文件 (JSON 等)
-      scripts_dir_rel_path = Pathname.new(scripts_input_dir).relative_path_from(Pathname.new(@input_dir)).to_s
-      file_list.reject! do |f|
-        Pathname.new(f).relative_path_from(Pathname.new(@input_dir)).to_s.downcase.start_with?(scripts_dir_rel_path.downcase)
-      end
-    end
-    # --- 脚本打包处理结束 ---
-
-    # 如果没有文件需要处理 (且未处理脚本)，则提前返回
-    if file_list.empty? && !scripts_processed
-      Logging::Log.info "未找到匹配条件的文件进行处理。"
-      return
+      # 从待处理列表移除脚本源文件 (逻辑不变)
+      scripts_rel_path = Pathname.new(Converter::Scripts::SCRIPTS_SUBDIR).to_s.downcase
+      file_list.reject! { |f| begin; Pathname.new(f).relative_path_from(@input_dir).to_s.downcase.start_with?(scripts_rel_path);       rescue; false; end }
     end
 
-    # --- 初始化转换器 ---
+    return Logging::Log.info "未找到匹配条件的文件进行处理。" if file_list.empty? && !scripts_processed
+
     exporter = Converter::JsonExporter.new(@options[:rgss_version]) if @options[:unpack]
     restorer = Converter::RvdataRestorer.new(@options[:rgss_version]) if @options[:pack]
 
-    # --- 遍历文件列表进行转换 ---
+    # --- 文件遍历处理 (路径逻辑不变，因为基于 @input_dir 和 @output_dir) ---
     file_list.each do |input_file|
-      # 获取相对于输入目录的路径 (用于构造输出路径)
-      relative_path = Pathname.new(input_file).relative_path_from(Pathname.new(@input_dir)).to_s
-      # 获取不带扩展名的基础名
-      basename_no_ext = relative_path.chomp(input_extension)
-      file_basename_for_log = File.basename(input_file) # 用于日志记录的文件名
-
       begin
-        # --- 特殊处理：解包模式下的 Scripts 文件 ---
-        if @options[:unpack] && basename_no_ext.downcase == SCRIPTS_BASENAME
-          Logging::Log.info "解包 #{file_basename_for_log} -> 脚本文件..."
-          input_object = Converter::IO.load_marshal_data(input_file)
-          if input_object.nil?
-            Logging::Log.warn "从 '#{file_basename_for_log}' 加载的对象为 nil。跳过脚本解包。"
-            next
-          end
-          # 调用 Converter::Scripts.unpack 进行解包
-          Converter::Scripts.unpack(input_object, @output_dir)
-          scripts_processed = true
-          next # 处理完脚本文件，继续下一个文件
-        end
-        # --- 脚本解包处理结束 ---
+        relative_path = Pathname.new(input_file).relative_path_from(@input_dir).to_s
+        basename_no_ext = relative_path.chomp(input_extension)
+        log_basename = File.basename(input_file)
 
-        # --- 通用文件处理 ---
+        # --- 脚本解包 ---
+        if @options[:unpack] && File.basename(basename_no_ext).downcase == SCRIPTS_BASENAME.downcase
+          Logging::Log.info "解包 #{log_basename} -> 脚本文件..."
+          input_obj = Converter::IO.load_marshal_data(input_file)
+          raise "从 '#{log_basename}' 加载的对象为 nil" if input_obj.nil?
+          # 输出目录: @output_dir 下的 Scripts 子目录
+          scripts_output_directory = File.join(@output_dir, Converter::Scripts::SCRIPTS_SUBDIR)
+          Converter::Scripts.unpack(input_obj, scripts_output_directory)
+          scripts_processed = true
+          next
+        end
+
+        # --- 常规文件处理 ---
         if @options[:unpack]
-          # --- 解包模式 ---
-          Logging::Log.info "解包 #{file_basename_for_log} -> JSON..."
-          # 1. 加载 Marshal 数据
-          input_object = Converter::IO.load_marshal_data(input_file)
-          if input_object.nil?
-            Logging::Log.warn "从 '#{file_basename_for_log}' 加载的对象为 nil。跳过解包。"
-            next
-          end
-          # 2. 导出为 JSON 兼容结构
-          cleaned_data = exporter.export(input_object)
-          # 3. 构造 JSON 输出文件路径
-          json_output_file = File.join(@output_dir, basename_no_ext + ".json")
-          FileUtils.mkdir_p(File.dirname(json_output_file)) # 确保目录存在
-          # 4. 写入 JSON 文件
+          Logging::Log.info "解包 #{log_basename} -> JSON..."
+          input_obj = Converter::IO.load_marshal_data(input_file)
+          raise "从 '#{log_basename}' 加载的对象为 nil" if input_obj.nil?
+          cleaned_data = exporter.export(input_obj)
+          output_basename = File.basename(basename_no_ext)
+          json_output_file = File.join(@output_dir, output_basename + ".json")
+          FileUtils.mkdir_p(File.dirname(json_output_file))
           Converter::IO.write_json_data(json_output_file, cleaned_data)
           Logging::Log.info "  解包输出: #{json_output_file}"
-        else
-          # --- 封包模式 ---
-          Logging::Log.info "封包 #{file_basename_for_log} -> RVData/RXData..."
-          # 1. 加载 JSON 数据
+        else # pack
+          Logging::Log.info "封包 #{log_basename} -> RVData/RXData..."
           input_data = Converter::IO.load_json_data(input_file)
-          if input_data.nil?
-            Logging::Log.warn "从 JSON 文件 '#{file_basename_for_log}' 加载的数据为 nil。跳过封包。"
-            next
-          end
-          # 2. 恢复为 Ruby 对象
-          restored_object = restorer.restore(input_data)
-          if restored_object.nil?
-            Logging::Log.warn "从 JSON 文件 '#{file_basename_for_log}' 恢复的对象为 nil。跳过 Marshal 写入。"
-            next
-          end
-          # 3. 构造 Marshal 输出文件路径
-          rvdata_output_file = File.join(@output_dir, basename_no_ext + output_extension)
-          FileUtils.mkdir_p(File.dirname(rvdata_output_file)) # 确保目录存在
-          # 4. 写入 Marshal 文件
-          Converter::IO.write_marshal_data(rvdata_output_file, restored_object)
+          raise "从 JSON 文件 '#{log_basename}' 加载的数据为 nil" if input_data.nil?
+          restored_obj = restorer.restore(input_data)
+          raise "从 JSON 文件 '#{log_basename}' 恢复的对象为 nil" if restored_obj.nil?
+          output_basename = File.basename(basename_no_ext)
+          rvdata_output_file = File.join(@output_dir, output_basename + output_extension)
+          FileUtils.mkdir_p(File.dirname(rvdata_output_file))
+          Converter::IO.write_marshal_data(rvdata_output_file, restored_obj)
           Logging::Log.info "  封包输出: #{rvdata_output_file}"
         end
-      rescue NameError => e
-        # 捕获因 RGSS 版本不匹配导致的 NameError
-        Logging::Log.error "处理文件 '#{file_basename_for_log}' 时出错 (可能是 RGSS 版本不匹配):"
-        Logging::Log.error "  错误: #{e.class}: #{e.message}."
-        Logging::Log.error "  提示: 请确保指定的 RGSS 版本 (--rgss1/2/3 或自动检测) 与数据文件匹配。"
-        Logging::Log.error "  当前使用的 RGSS 版本: #{@options[:rgss_version]}"
-        raise # 重新抛出异常，中断执行
-      rescue => e
-        # 捕获处理单个文件时的其他所有错误
-        Logging::Log.error "处理文件 '#{file_basename_for_log}' 失败:"
-        Logging::Log.error "  RGSS 版本: #{@options[:rgss_version]}"
-        Logging::Log.error "  错误: #{e.class}: #{e.message}"
-        e.backtrace.first(10).each { |line| Logging::Log.error "    #{line}" }
-        raise # 重新抛出异常，中断执行
-      end
-    end # file_list.each end
-  end # def process_files end
+      rescue => e; log_processing_error(e, "文件 '#{log_basename}'", @options[:rgss_version]); raise;       end
+    end
+  end
 
-  # 获取要处理的文件列表
-  # @return [Array<String>, String, String] 文件路径列表, 输入扩展名, 输出扩展名
+  # 获取最终要处理的文件列表
   def get_file_list
-    # 根据 RGSS 版本确定 Marshal 文件扩展名
-    rvdata_extension = case @options[:rgss_version]
-      when "RGSS1" then ".rxdata"
-      when "RGSS2" then ".rvdata"
-      when "RGSS3" then ".rvdata2"
-      else raise "内部错误: 未知的 RGSS 版本 #{@options[:rgss_version]}"
+    rvdata_ext = case @options[:rgss_version]
+      when "RGSS1"; ".rxdata"
+      when "RGSS2"; ".rvdata"
+      when "RGSS3"; ".rvdata2"
+      else raise "内部错误"
       end
-    source_extension = ".json" # JSON 文件扩展名固定
+    source_ext = ".json"
+    input_extension = @options[:unpack] ? rvdata_ext : source_ext
+    output_extension = @options[:unpack] ? source_ext : rvdata_ext
 
-    # 根据操作模式确定输入和输出扩展名
-    input_extension = @options[:unpack] ? rvdata_extension : source_extension
-    output_extension = @options[:unpack] ? source_extension : rvdata_extension
-
-    Logging::Log.info "在 #{@input_dir} 中搜索扩展名为 #{input_extension} 的输入文件"
+    Logging::Log.info "在最终输入目录 #{@input_dir} 中搜索 *#{input_extension} 文件"
 
     all_files = []
     begin
-      # 递归查找输入目录下的所有文件
-      Find.find(@input_dir) do |path|
-        next unless File.file?(path) # 只处理文件
-        # 检查文件扩展名是否匹配 (不区分大小写)
-        if File.extname(path).downcase == input_extension.downcase
-          all_files << path
-        end
-      end
-    rescue SystemCallError => e
-      # 处理访问输入目录时的错误
-      raise "访问输入目录 '#{@input_dir}' 时出错: #{e.message}"
-    end
+      raise "最终输入目录 '#{@input_dir}' 不存在" unless Dir.exist?(@input_dir)
+      Find.find(@input_dir) { |p| all_files << p if File.file?(p) && File.extname(p).downcase == input_extension.downcase }
+    rescue SystemCallError => e; raise "访问输入目录 '#{@input_dir}' 时出错: #{e.message}";     end
 
-    # --- 应用文件过滤规则 ---
-    filtered_files = all_files.select do |file_path|
+    # 文件过滤
+    filtered = all_files.select do |f|
       begin
-        # 获取相对于输入目录的路径
-        relative_path = Pathname.new(file_path).relative_path_from(Pathname.new(@input_dir)).to_s
-        # 获取不带扩展名的基础名
-        basename = relative_path.chomp(File.extname(relative_path))
-
-        # 检查是否匹配包含规则 (如果规则列表为空，则默认包含)
-        included = @file_patterns.empty? || @file_patterns.any? { |regex| basename.match?(regex) }
-        # 检查是否匹配排除规则
-        excluded = !@exclude_patterns.empty? && @exclude_patterns.any? { |regex| basename.match?(regex) }
-
-        if Logging::Log.debug?
-          match_log = "检查 '#{relative_path}': included=#{included}, excluded=#{excluded}"
-          Logging::Log.debug match_log
-        end
-
-        # 只有当包含且不排除时，才选择此文件
+        rel_path = Pathname.new(f).relative_path_from(@input_dir).to_s
+        base = rel_path.chomp(File.extname(rel_path))
+        included = @file_patterns.empty? || @file_patterns.any? { |re| base.match?(re) }
+        excluded = !@exclude_patterns.empty? && @exclude_patterns.any? { |re| base.match?(re) }
         included && !excluded
+      rescue ArgumentError
+        Logging::Log.warn "过滤期间无法计算相对路径: '#{f}' 相对于 '#{@input_dir}'。跳过此文件。"
+        false
       rescue => e
-        # 记录处理路径时的错误
-        Logging::Log.warn "在过滤期间处理路径 '#{file_path}' 时出错: #{e.message}。跳过此文件。"
-        false # 出错则不选择
+        Logging::Log.warn "过滤路径 '#{f}' 出错: #{e.message}. 跳过."; false
       end
+    end.uniq.sort
+
+    Logging::Log.info(filtered.empty? ? "未找到匹配条件的文件。" : "找到 #{filtered.size} 个文件进行处理。")
+    filtered.each { |f| Logging::Log.debug "  - #{Pathname.new(f).relative_path_from(@input_dir) rescue File.basename(f)}" } if Logging::Log.debug?
+    return filtered, input_extension, output_extension
+  end
+
+  # --- 辅助方法：记录处理错误 ---
+  def log_processing_error(error, context, rgss_version = nil)
+    Logging::Log.error "处理 #{context} 失败:"
+    Logging::Log.error "  RGSS 版本: #{rgss_version || @options[:rgss_version]}" if rgss_version || @options[:rgss_version]
+    Logging::Log.error "  错误: #{error.class}: #{error.message}"
+    error.backtrace.first(10).each { |line| Logging::Log.error "    #{line}" }
+    if error.is_a?(NameError)
+      Logging::Log.error "  提示: NameError 通常表示 RGSS 版本不匹配或所需类未定义。"
     end
-    # --- 过滤结束 ---
+  end
 
-    filtered_files.uniq! # 去重
-    filtered_files.sort! # 排序
-
-    if filtered_files.empty?
-      Logging::Log.info "在 '#{@input_dir}' 中未找到匹配条件的文件 (扩展名: #{input_extension}, 应用模式后)。"
+  # --- 辅助方法：记录提取错误 ---
+  def log_extraction_error(error, filename)
+    rgssad_error_class = defined?(RgssadExtractor::RGSSADFileError) ? RgssadExtractor::RGSSADFileError : nil
+    case error
+    when rgssad_error_class
+      Logging::Log.error "存档文件 '#{filename}' 处理失败 (C 扩展报告): #{error.message}"
+    when SystemCallError
+      Logging::Log.error "存档提取期间发生 I/O 错误 (C 扩展报告): #{error.message}"
     else
-      Logging::Log.info "找到 #{filtered_files.length} 个文件进行处理。"
-      # 如果是 Debug 级别，列出找到的文件
-      if Logging::Log.debug?
-        filtered_files.each { |f| Logging::Log.debug "  - #{Pathname.new(f).relative_path_from(Pathname.new(@input_dir))}" }
-      end
+      Logging::Log.error "存档提取过程中发生未知错误: #{error.class}: #{error.message}"
+      Logging::Log.error "调用栈:\n#{error.backtrace.first(10).join("\n")}"
     end
-
-    return filtered_files, input_extension, output_extension
-  end # def get_file_list end
+  end
 end # class Application

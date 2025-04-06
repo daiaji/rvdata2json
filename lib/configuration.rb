@@ -1,57 +1,50 @@
+# lib/configuration.rb
 # 负责加载和管理 YAML 配置文件
 
-require "yaml"         # 用于解析 YAML 文件
-require "pathname"     # 用于处理文件路径
-require_relative "logging" # 加载日志模块以访问常量和进行验证 (虽然主要日志记录在 Application 中)
-require_relative "application" # 引入 Application 以访问 RGSS_VERSIONS 常量
+require "yaml"
+require "pathname"
+require_relative "logging"
+# 不直接 require application 以避免循环依赖
 
 class Configuration
-  # 默认配置文件名
   DEFAULT_CONFIG_FILENAME = "config.yaml".freeze
 
   # 默认配置项
-  # 如果配置文件不存在或缺少某些键，将使用这些默认值
   DEFAULT_CONFIG = {
-    # 默认 RGSS 版本 (在自动检测失败且命令行未指定时使用)
-    "rgss_version" => "RGSS3", # 可选: "RGSS1", "RGSS2", "RGSS3"
-
-    # 输入目录 (相对于游戏根目录)
-    "input_dir_marshal" => "Data_原始", # 存放原始 RVData/RXData 文件的目录
-    "input_dir_source" => "Source",    # 存放 JSON 和 Scripts 子目录的目录
-
-    # 输出目录 (相对于游戏根目录)
-    "output_dir_source" => "Source",    # 输出 JSON 和 Scripts 子目录的目录
-    "output_dir_marshal" => "Data",     # 输出 RVData/RXData 文件的目录
-
-    # 要处理的文件基础名列表 (作为不区分大小写的正则表达式处理)
+    "rgss_version" => "RGSS3",
+    # --- 注意: 这些路径是相对于 --base-dir (基准目录) 的 ---
+    "input_dir_marshal" => "Data",
+    "input_dir_source" => "Source",
+    "output_dir_source" => "Source",
+    "output_dir_marshal" => "Data",
+    # ----------------------------------------------------
     "files" => [
       "Actors", "Animations", "Armors", "Classes", "CommonEvents",
       "Enemies", "Items", "MapInfos", "Scripts", "Skills", "States", "System",
-      "Tilesets", "Troops", "Weapons", "Map\\d{3}", # 匹配 Map001, Map002 等
+      "Tilesets", "Troops", "Weapons", "Map\\d{3}",
     ],
-
-    # 要排除的文件基础名列表 (作为不区分大小写的正则表达式处理)
-    "exclude_files" => ["Areas", "Main"], # 例如，排除 RGSS2 特有的 Areas 文件
-
-    # --- 日志配置 ---
+    "exclude_files" => ["Areas"],
+    "archive_processing" => {
+      "enabled" => true,
+      "archive_filenames" => {
+        "RGSS1" => "Game.rgssad",
+        "RGSS2" => "Game.rgss2a",
+        "RGSS3" => "Game.rgss3a",
+      },
+      "delete_archive_after_extraction" => false,
+    },
     "logging" => {
-      # 日志级别 (DEBUG, INFO, WARN, ERROR, FATAL, UNKNOWN)
       "log_level" => "INFO",
-      # 是否启用文件日志
       "log_to_file" => false,
-      # 日志文件存放目录 (相对于游戏根目录)
+      # --- 注意: log_directory 也是相对于 --base-dir (基准目录) 的 ---
       "log_directory" => "logs",
-      # 日志文件名格式 ({timestamp} 会被替换)
+      # ----------------------------------------------------------
       "log_filename_format" => "rvdata2json_{timestamp}.log",
-      # 是否在控制台启用彩色输出
       "enable_colors" => true,
     },
-  # -----------------------
   }.freeze
 
-  # 配置文件的路径
   attr_reader :path
-  # 加载并合并后的配置数据
   attr_reader :data
 
   # 初始化 Configuration 对象
@@ -59,6 +52,7 @@ class Configuration
   def initialize(config_path_arg = nil)
     if config_path_arg
       # 如果指定了路径，根据是绝对路径还是相对路径进行处理
+      # 注意：这里的相对路径是相对于当前工作目录
       @path = File.absolute_path?(config_path_arg) ? config_path_arg : File.expand_path(config_path_arg, Dir.pwd)
     else
       # 如果未指定路径，使用项目根目录下的默认文件名
@@ -91,8 +85,7 @@ class Configuration
 
     # 将加载的数据深度合并到默认配置上 (配置文件中的值覆盖默认值)
     @data = deep_merge(DEFAULT_CONFIG.dup, loaded_data) # 使用 dup 避免修改 DEFAULT_CONFIG
-    # 验证合并后的配置
-    validate_config
+    validate_config # 验证合并后的配置
     @data
   end
 
@@ -126,36 +119,83 @@ class Configuration
   # 验证合并后的配置数据是否有效
   # @raise [RuntimeError] 如果验证失败
   def validate_config
+    # 延迟加载 Application 常量以避免循环依赖
+    unless defined?(Application::RGSS_VERSIONS)
+      begin
+        require_relative "application" unless defined?(Application) # 只有未定义时才加载
+      rescue LoadError
+        raise "无法加载 Application 类来验证 RGSS 版本。"
+      end
+    end
+
     # --- 验证 RGSS 版本 ---
-    rgss_version_valid = @data["rgss_version"].is_a?(String) && Application::RGSS_VERSIONS.include?(@data["rgss_version"])
-    unless rgss_version_valid
-      raise "配置错误: 'rgss_version' 必须是 #{Application::RGSS_VERSIONS.join(" 或 ")} 之一 (当前值: #{@data["rgss_version"].inspect})"
+    rgss_version = @data["rgss_version"]
+    unless rgss_version.is_a?(String) && Application::RGSS_VERSIONS.include?(rgss_version)
+      raise "配置错误: 'rgss_version' 必须是 #{Application::RGSS_VERSIONS.join(" 或 ")} 之一 (当前值: #{rgss_version.inspect})"
     end
 
     # --- 验证目录路径 ---
     %w[input_dir_marshal input_dir_source output_dir_source output_dir_marshal].each do |key|
-      unless @data[key].is_a?(String) && !@data[key].empty?
-        raise "配置错误: 缺少或无效的目录键 '#{key}' (值: #{@data[key].inspect})"
+      dir_path = @data[key]
+      unless dir_path.is_a?(String) && !dir_path.empty?
+        raise "配置错误: 缺少或无效的目录键 '#{key}' (值: #{dir_path.inspect})"
       end
     end
 
     # --- 验证文件列表 ---
-    raise "配置错误: 'files' 必须是一个数组" unless @data["files"].is_a?(Array)
-    raise "配置错误: 'exclude_files' 必须是一个数组" unless @data["exclude_files"].is_a?(Array)
+    files_list = @data["files"]
+    exclude_files_list = @data["exclude_files"]
+    raise "配置错误: 'files' 必须是一个数组" unless files_list.is_a?(Array)
+    raise "配置错误: 'exclude_files' 必须是一个数组" unless exclude_files_list.is_a?(Array)
+
+    # --- 验证存档处理配置 ---
+    archive_config = @data["archive_processing"] || {}
+    raise "配置错误: 'archive_processing' 部分必须是一个哈希" unless archive_config.is_a?(Hash)
+
+    enabled_flag = archive_config["enabled"]
+    raise "配置错误: 'archive_processing.enabled' 必须是 true 或 false (当前值: #{enabled_flag.inspect})" unless [true, false].include?(enabled_flag)
+
+    filenames_hash = archive_config["archive_filenames"]
+    raise "配置错误: 'archive_processing.archive_filenames' 必须是一个哈希" unless filenames_hash.is_a?(Hash)
+    Application::RGSS_VERSIONS.each do |version|
+      filename = filenames_hash[version]
+      unless filename.is_a?(String) && !filename.empty?
+        raise "配置错误: 'archive_processing.archive_filenames' 中缺少或无效的版本 '#{version}' 条目 (值: #{filename.inspect})"
+      end
+    end
+
+    # --- 验证 delete_archive_after_extraction ---
+    delete_flag = archive_config["delete_archive_after_extraction"]
+    raise "配置错误: 'archive_processing.delete_archive_after_extraction' 必须是 true 或 false (当前值: #{delete_flag.inspect})" unless [true, false].include?(delete_flag)
+    # -----------------------------------------------
 
     # --- 验证日志配置 ---
     log_config = @data["logging"] || {}
-    unless log_config.is_a?(Hash)
-      raise "配置错误: 'logging' 部分必须是一个哈希 (字典/映射)。"
-    end
+    raise "配置错误: 'logging' 部分必须是一个哈希" unless log_config.is_a?(Hash)
 
     log_level = log_config["log_level"]
-    # 检查日志级别是否有效 (允许为 nil，表示使用默认或命令行覆盖)
+    # 延迟加载 Logging 常量
+    unless defined?(Logging::VALID_LOG_LEVELS)
+      begin
+        require_relative "logging" unless defined?(Logging) # 只有未定义时才加载
+      rescue LoadError
+        raise "无法加载 Logging 模块来验证日志级别。"
+      end
+    end
     unless log_level.nil? || (log_level.is_a?(String) && Logging::VALID_LOG_LEVELS.include?(log_level.upcase))
       raise "配置错误: 'logging.log_level' 必须是字符串且为 #{Logging::VALID_LOG_LEVELS.join(", ")} 之一 (当前: #{log_level.inspect})"
     end
 
-    # 对 log_to_file, log_directory, log_filename_format, enable_colors 的类型验证可以在 Logging.setup_logger 中进行，
-    # 这里只做基本检查，确保 logging 部分是 Hash 并且 log_level (如果存在) 是有效的。
+    log_to_file = log_config["log_to_file"]
+    raise "配置错误: 'logging.log_to_file' 必须是 true 或 false (当前: #{log_to_file.inspect})" unless [true, false].include?(log_to_file)
+
+    log_directory = log_config["log_directory"]
+    raise "配置错误: 'logging.log_directory' 必须是一个字符串 (当前: #{log_directory.inspect})" unless log_directory.is_a?(String)
+
+    log_filename_format = log_config["log_filename_format"]
+    raise "配置错误: 'logging.log_filename_format' 必须是一个字符串 (当前: #{log_filename_format.inspect})" unless log_filename_format.is_a?(String)
+
+    enable_colors = log_config["enable_colors"]
+    raise "配置错误: 'logging.enable_colors' 必须是 true 或 false (当前: #{enable_colors.inspect})" unless [true, false].include?(enable_colors)
   end
 end
