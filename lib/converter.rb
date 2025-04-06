@@ -10,7 +10,6 @@ require "zlib" # 引入 zlib 用于脚本压缩/解压缩
 module Converter
   # 文件 IO 操作子模块 (保持不变)
   module IO
-    # ... (load_marshal_data, load_json_data, write_json_data, write_marshal_data, find_problematic_path 保持不变) ...
     def self.load_marshal_data(input_file)
       begin
         File.open(input_file, "rb") { |f| Marshal.load(f) }
@@ -524,7 +523,7 @@ module Converter
           begin
             # 使用二进制读取
             script_code = File.binread(script_filepath)
-            puts "  读取脚本: #{script_filename}"
+            puts "  封包脚本: #{script_filename} (ID: #{id}, Name: '#{name}')"
           rescue => e
             $stderr.puts "[警告] 读取脚本文件 '#{script_filepath}' 失败: #{e.message}。将使用空代码。"
             script_code = ""
@@ -546,7 +545,9 @@ module Converter
         # 注意：这里的 name 已经是经过处理的 UTF-8 字符串（可能含'?'）
         # 如果需要恢复原始字节，需要在 unpack 时将原始字节也存入 metadata，但这会增加复杂性
         # 目前保持与 R3EXS pack 行为一致，使用 JSON 中的 name
-        scripts_array[index] = [id, name, compressed_code]
+        # --- R3EXS pack 使用原始 ID，这里也应该使用原始 ID ---
+        scripts_array[index] = [id, name, compressed_code] # 使用从 JSON 读取的 ID 和 name
+        # ----------------------------------------------------
       end
 
       puts "脚本封包完成，准备写入 Marshal 文件。"
